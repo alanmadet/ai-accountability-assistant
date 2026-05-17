@@ -1,10 +1,15 @@
 from fastapi import FastAPI
+from fastapi import Request
 from fastapi.middleware.cors import CORSMiddleware
+
+from starlette.middleware.sessions import SessionMiddleware
 
 import threading
 import time
 import uuid
-import random
+import os
+
+os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 
 from sqlalchemy.orm import Session
 
@@ -17,7 +22,51 @@ from models import SyncJob
 
 from ai_service import extract_tasks
 
+from dotenv import load_dotenv
+
+from authlib.integrations.starlette_client import OAuth
+
+from googleapiclient.discovery import build
+from google.oauth2.credentials import Credentials
+from fastapi.responses import RedirectResponse
+
+load_dotenv()
+
 app = FastAPI()
+
+app.add_middleware(
+    SessionMiddleware,
+    secret_key="super-secret-key",
+    same_site="lax",
+    https_only=False
+)
+
+GOOGLE_CLIENT_ID = os.getenv(
+    "GOOGLE_CLIENT_ID"
+)
+
+GOOGLE_CLIENT_SECRET = os.getenv(
+    "GOOGLE_CLIENT_SECRET"
+)
+
+SCOPES = [
+    "https://www.googleapis.com/auth/gmail.readonly"
+]
+
+oauth = OAuth()
+
+oauth.register(
+    name="google",
+    client_id=GOOGLE_CLIENT_ID,
+    client_secret=GOOGLE_CLIENT_SECRET,
+    server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+    client_kwargs={
+        "scope": (
+            "openid email profile "
+            "https://www.googleapis.com/auth/gmail.readonly"
+        )
+    }
+)
 
 Base.metadata.create_all(bind=engine)
 
@@ -29,75 +78,184 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-fake_emails = [
-    """
-Hey Alan,
-
-Can you send over the updated insurance form by tomorrow?
-
-Thanks,
-Sarah
-""",
-    """
-Hi Alan,
-
-Just following up regarding the recruiter conversation.
-Please send your availability for next week.
-
-Best,
-Mike
-""",
-    """
-Alan,
-
-We're still waiting on HOA approval documents.
-I'll update you once I hear back.
-
-- Jennifer
-"""
-]
-
-def seed_tasks():
-
-    db: Session = SessionLocal()
-
-    existing = db.query(Task).count()
-
-    if existing == 0:
-
-        initial_tasks = [
-            {
-                "title": "Reply to Sam about proposal",
-                "status": "Overdue · 2 days",
-                "category": "you_owe",
-                "priority": "high"
-            },
-            {
-                "title": "Submit HOA document",
-                "status": "Due tomorrow",
-                "category": "you_owe",
-                "priority": "high"
-            }
-        ]
-
-        for task_data in initial_tasks:
-
-            task = Task(
-                id=str(uuid.uuid4()),
-                **task_data
-            )
-
-            db.add(task)
-
-        db.commit()
-
-    db.close()
-
-seed_tasks()
 
 @app.get("/")
 def root():
     return {"message": "Backend running"}
+
+@app.get("/auth/login")
+async def login(request: Request):
+
+    redirect_uri = (
+        "http://localhost:8000/auth/callback"
+    )
+
+    return await oauth.google.authorize_redirect(
+        request,
+        redirect_uri
+    )
+
+@app.get("/auth/callback")
+async def auth_callback(request: Request):
+
+    token = await oauth.google.authorize_access_token(
+        request
+    )
+
+    request.session["google_token"] = token
+
+    return RedirectResponse(
+    "http://localhost:5175"
+    )
+
+@app.get("/auth/status")
+async def auth_status(request: Request):
+
+    token = request.session.get(
+        "google_token"
+    )
+
+    return {
+        "authenticated": token is not None
+    }
+
+@app.get("/gmail/messages")
+async def get_gmail_messages(request: Request):
+
+    token = request.session.get(
+        "google_token"
+    )
+
+    if not token:
+
+        return {
+            "error": "Not authenticated"
+        }
+
+    credentials = Credentials(
+        token=token["access_token"]
+    )
+
+    gmail = build(
+        "gmail",
+        "v1",
+        credentials=credentials
+    )
+
+    results = gmail.users().messages().list(
+        userId="me",
+        maxResults=5
+    ).execute()
+
+    messages = results.get("messages", [])
+
+    detailed_messages = []
+
+    for message in messages:
+
+        msg = gmail.users().messages().get(
+            userId="me",
+            id=message["id"]
+        ).execute()
+
+        headers = msg["payload"].get(
+            "headers",
+            []
+        )
+
+        subject = ""
+        sender = ""
+
+        for header in headers:
+
+            if header["name"] == "Subject":
+                subject = header["value"]
+
+            if header["name"] == "From":
+                sender = header["value"]
+
+        detailed_messages.append({
+            "id": message["id"],
+            "subject": subject,
+            "from": sender,
+            "snippet": msg.get("snippet", "")
+        })
+
+    return {
+        "messages": detailed_messages
+    }
+
+def fetch_recent_emails(token):
+
+    credentials = Credentials(
+        token=token["access_token"]
+    )
+
+    gmail = build(
+        "gmail",
+        "v1",
+        credentials=credentials
+    )
+
+    results = gmail.users().messages().list(
+        userId="me",
+        maxResults=5,
+        q="newer_than:30d"
+    ).execute()
+
+    messages = results.get("messages", [])
+
+    print("TOTAL GMAIL MESSAGES:")
+    print(len(messages))
+
+    email_texts = []
+
+    for message in messages:
+
+        print("PROCESSING MESSAGE")
+        print(message["id"])
+
+        msg = gmail.users().messages().get(
+            userId="me",
+            id=message["id"]
+        ).execute()
+
+        headers = msg["payload"].get(
+            "headers",
+            []
+        )
+
+        subject = ""
+        sender = ""
+
+        for header in headers:
+
+            if header["name"] == "Subject":
+                subject = header["value"]
+
+            if header["name"] == "From":
+                sender = header["value"]
+
+        snippet = msg.get(
+            "snippet",
+            "No preview available"
+        )
+
+        email_content = f"""
+Subject: {subject}
+
+From: {sender}
+
+Body:
+{snippet}
+"""
+
+        print("EMAIL CONTENT:")
+        print(email_content)
+
+        email_texts.append(email_content)
+
+    return email_texts
 
 @app.get("/tasks")
 def get_tasks():
@@ -136,46 +294,45 @@ def update_job_status(job_id: str, status: str):
 
     db.close()
 
-def process_sync(job_id: str):
+def process_sync(job_id: str, token):
 
     update_job_status(
         job_id,
         "fetching_emails"
     )
 
-    time.sleep(2)
+
+    email_texts = fetch_recent_emails(token)
 
     update_job_status(
         job_id,
         "filtering_threads"
     )
 
-    time.sleep(2)
 
     update_job_status(
         job_id,
         "extracting_tasks"
     )
 
-    time.sleep(2)
 
     db: Session = SessionLocal()
 
-    email = random.choice(fake_emails)
+    for email in email_texts:
 
-    extracted_tasks = extract_tasks(email)
+        extracted_tasks = extract_tasks(email)
 
-    for task_data in extracted_tasks:
+        for task_data in extracted_tasks:
 
-        task = Task(
-            id=str(uuid.uuid4()),
-            title=task_data["title"],
-            status=task_data["status"],
-            category=task_data["category"],
-            priority=task_data["priority"]
-        )
+            task = Task(
+                id=str(uuid.uuid4()),
+                title=task_data["title"],
+                status=task_data["status"],
+                category=task_data["category"],
+                priority=task_data["priority"]
+            )
 
-        db.add(task)
+            db.add(task)
 
     db.commit()
 
@@ -194,7 +351,17 @@ def process_sync(job_id: str):
     )
 
 @app.post("/sync")
-def start_sync():
+async def start_sync(request: Request):
+
+    token = request.session.get(
+        "google_token"
+    )
+
+    if not token:
+
+        return {
+            "error": "Not authenticated"
+        }
 
     db: Session = SessionLocal()
 
@@ -213,7 +380,7 @@ def start_sync():
 
     thread = threading.Thread(
         target=process_sync,
-        args=(job_id,)
+        args=(job_id, token)
     )
 
     thread.start()

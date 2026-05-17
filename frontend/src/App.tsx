@@ -1,299 +1,252 @@
-import { useEffect, useState } from "react"
-
-import TaskCard from "./components/TaskCard"
-import SummaryCard from "./components/SummaryCard"
-
+import { useEffect, useState } from "react";
 import {
-  fetchTasks,
-  startSync,
-  getSyncStatus
-} from "./services/api"
-
-import { Task } from "./types/task"
-
-import {
-  Mail,
+  RefreshCw,
   Clock3,
+  Mail,
   AlertCircle,
-  RefreshCcw
-} from "lucide-react"
+} from "lucide-react";
 
-export default function App() {
+import TaskCard from "./components/TaskCard";
+import type { Task } from "./types/task";
 
-  const [tasks, setTasks] = useState<Task[]>([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState("")
-  const [syncing, setSyncing] = useState(false)
+function App() {
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [syncing, setSyncing] = useState(false);
 
-  async function loadTasks() {
+  const [syncStatus, setSyncStatus] = useState("");
 
-    const data = await fetchTasks()
+  const [isAuthenticated, setIsAuthenticated] =
+    useState<boolean | null>(null);
 
-    setTasks(data)
-  }
-
-  async function handleSync() {
-
+  async function checkAuthStatus() {
     try {
+      const response = await fetch(
+        "http://localhost:8000/auth/status",
+        {
+          credentials: "include",
+        }
+      );
 
-      setError("")
-      setSyncing(true)
+      const data = await response.json();
 
-      const syncResponse = await startSync()
+      if (!data.authenticated) {
+        window.location.href =
+          "http://localhost:8000/auth/login";
 
-      const jobId = syncResponse.job_id
-
-      let status = "queued"
-
-      while (
-        status === "queued" ||
-        status === "processing"
-      ) {
-
-        await new Promise(resolve =>
-          setTimeout(resolve, 1000)
-        )
-
-        const statusResponse =
-          await getSyncStatus(jobId)
-
-        status = statusResponse.status
+        return;
       }
 
-      await loadTasks()
+      setIsAuthenticated(true);
+    } catch (error) {
+      console.error(error);
+    }
+  }
 
-    } catch (err) {
+  async function loadTasks() {
+    try {
+      const response = await fetch(
+        "http://localhost:8000/tasks",
+        {
+          credentials: "include",
+        }
+      );
 
-      setError("Inbox sync failed")
+      const data = await response.json();
 
-    } finally {
+      setTasks(data.tasks);
+    } catch (error) {
+      console.error(error);
+    }
+  }
 
-      setSyncing(false)
+  async function pollSyncStatus(jobId: string) {
+    const interval = setInterval(async () => {
+      try {
+        const response = await fetch(
+          `http://localhost:8000/sync-status/${jobId}`,
+          {
+            credentials: "include",
+          }
+        );
+
+        const data = await response.json();
+
+        setSyncStatus(data.status);
+
+        if (data.status === "complete") {
+          clearInterval(interval);
+
+          setSyncing(false);
+
+          setSyncStatus("");
+
+          loadTasks();
+        }
+      } catch (error) {
+        console.error(error);
+
+        clearInterval(interval);
+
+        setSyncing(false);
+      }
+    }, 2000);
+  }
+
+  async function handleRefreshInbox() {
+    try {
+      setSyncing(true);
+
+      const response = await fetch(
+        "http://localhost:8000/sync",
+        {
+          method: "POST",
+          credentials: "include",
+        }
+      );
+
+      const data = await response.json();
+
+      pollSyncStatus(data.job_id);
+    } catch (error) {
+      console.error(error);
+
+      setSyncing(false);
     }
   }
 
   useEffect(() => {
+    checkAuthStatus();
+  }, []);
 
-    async function initialize() {
-
-      try {
-
-        setLoading(true)
-
-        await loadTasks()
-
-      } catch (err) {
-
-        setError("Failed to load tasks")
-
-      } finally {
-
-        setLoading(false)
-      }
+  useEffect(() => {
+    if (isAuthenticated) {
+      loadTasks();
     }
+  }, [isAuthenticated]);
 
-    initialize()
-
-  }, [])
-
-  const waitingOnItems = tasks.filter(
-    task => task.category === "waiting_on"
-  )
-
-  const youOweItems = tasks.filter(
-    task => task.category === "you_owe"
-  )
+  if (isAuthenticated === null) {
+    return (
+      <div className="min-h-screen bg-zinc-950 text-white flex items-center justify-center">
+        <div className="flex items-center gap-3 text-zinc-400">
+          <RefreshCw className="animate-spin" size={20} />
+          <span>Authenticating...</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-zinc-100 flex">
+    <div className="min-h-screen bg-zinc-950 text-white p-6">
+      <div className="max-w-5xl mx-auto">
+        <div className="flex items-center justify-between mb-10">
+          <div>
+            <div className="flex items-center gap-3 mb-2">
+              <Mail className="text-blue-400" size={28} />
 
-      {/* Sidebar */}
-      <aside className="w-64 bg-white border-r border-zinc-200 p-6 hidden md:block">
-        <h1 className="text-2xl font-bold mb-10">
-          AI Assistant
-        </h1>
+              <h1 className="text-3xl font-bold">
+                Accountability Assistant
+              </h1>
+            </div>
 
-        <nav className="space-y-4">
-          <div className="text-zinc-900 font-medium">
-            Home
+            <p className="text-zinc-400">
+              AI-powered inbox accountability dashboard
+            </p>
           </div>
-
-          <div className="text-zinc-500">
-            Waiting On
-          </div>
-
-          <div className="text-zinc-500">
-            You Owe
-          </div>
-
-          <div className="text-zinc-500">
-            Deadlines
-          </div>
-
-          <div className="text-zinc-500">
-            Settings
-          </div>
-        </nav>
-      </aside>
-
-      {/* Main content */}
-      <main className="flex-1 p-6 md:p-10">
-
-        {/* Mobile top bar */}
-        <div className="md:hidden flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-bold">
-            AI Assistant
-          </h1>
 
           <button
-            onClick={handleSync}
-            className="bg-zinc-900 text-white px-4 py-2 rounded-xl text-sm"
+            onClick={handleRefreshInbox}
+            disabled={syncing}
+            className="bg-blue-500 hover:bg-blue-600 disabled:opacity-50 transition px-5 py-3 rounded-xl flex items-center gap-2 font-medium"
           >
-            Refresh
+            <RefreshCw
+              size={18}
+              className={syncing ? "animate-spin" : ""}
+            />
+
+            {syncing
+              ? "Syncing..."
+              : "Refresh Inbox"}
           </button>
         </div>
 
-        {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-4xl font-bold text-zinc-900">
-            Good morning, Alan 👋
-          </h1>
+        {syncStatus && (
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 mb-6 flex items-center gap-3">
+            <Clock3
+              className="text-yellow-400"
+              size={18}
+            />
 
-          <p className="text-zinc-500 mt-2">
-            Here's what's on your plate today.
-          </p>
-        </div>
+            <div>
+              <p className="font-medium">
+                Sync Status
+              </p>
 
-        {/* Loading */}
-        {loading && (
-          <div className="bg-white rounded-2xl p-6 shadow-sm mb-8">
-            Loading inbox analysis...
-          </div>
-        )}
-
-        {/* Syncing */}
-        {syncing && (
-          <div className="bg-blue-100 text-blue-600 rounded-2xl p-6 mb-8">
-            Analyzing inbox...
-          </div>
-        )}
-
-        {/* Error */}
-        {error && (
-          <div className="bg-red-100 text-red-600 rounded-2xl p-6 mb-8">
-            {error}
-          </div>
-        )}
-
-        {/* Main dashboard */}
-        {!loading && !error && (
-          <>
-
-            {/* Summary cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-
-              <SummaryCard
-                title="Unresolved follow-ups"
-                value={youOweItems.length}
-                icon={Mail}
-              />
-
-              <SummaryCard
-                title="Upcoming deadlines"
-                value={2}
-                icon={Clock3}
-              />
-
-              <SummaryCard
-                title="Waiting on responses"
-                value={waitingOnItems.length}
-                icon={AlertCircle}
-              />
-
-            </div>
-
-            {/* Gmail connection */}
-            <div className="bg-white rounded-2xl p-6 shadow-sm mb-8 flex items-center justify-between">
-
-              <div>
-                <h2 className="text-xl font-semibold">
-                  Gmail Connected
-                </h2>
-
-                <p className="text-zinc-500 mt-1">
-                  Ready to sync inbox
-                </p>
-              </div>
-
-              <button
-                onClick={handleSync}
-                disabled={syncing}
-                className="flex items-center gap-2 bg-zinc-900 text-white px-4 py-2 rounded-xl hover:bg-zinc-800 transition disabled:opacity-50"
-              >
-                <RefreshCcw className="w-4 h-4" />
-
-                {syncing
-                  ? "Syncing..."
-                  : "Refresh Inbox"}
-
-              </button>
-
-            </div>
-
-            {/* AI Summary */}
-            <div className="bg-white rounded-2xl p-6 shadow-sm mb-8">
-              <h2 className="text-xl font-semibold mb-4">
-                AI Summary
-              </h2>
-
-              <p className="text-zinc-600 leading-relaxed">
-                You have a few time-sensitive follow-ups.
-                The insurance claim update has been pending
-                for 9 days, and you still need to reply to
-                Sam regarding the project proposal.
+              <p className="text-sm text-zinc-400 capitalize">
+                {syncStatus.replace(/_/g, " ")}
               </p>
             </div>
-
-            {/* You Owe */}
-            <div className="bg-white rounded-2xl p-6 shadow-sm mb-8">
-
-              <h2 className="text-xl font-semibold mb-4">
-                You Owe
-              </h2>
-
-              <div className="space-y-4">
-                {youOweItems.map((task) => (
-                  <TaskCard
-                    key={task.id}
-                    task={task}
-                  />
-                ))}
-              </div>
-
-            </div>
-
-            {/* Waiting On */}
-            <div className="bg-white rounded-2xl p-6 shadow-sm">
-
-              <h2 className="text-xl font-semibold mb-4">
-                Waiting On
-              </h2>
-
-              <div className="space-y-4">
-                {waitingOnItems.map((task) => (
-                  <TaskCard
-                    key={task.id}
-                    task={task}
-                  />
-                ))}
-              </div>
-
-            </div>
-
-          </>
+          </div>
         )}
 
-      </main>
+        <div className="grid md:grid-cols-2 gap-6">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5">
+            <div className="flex items-center gap-2 mb-5">
+              <AlertCircle
+                className="text-red-400"
+                size={18}
+              />
+
+              <h2 className="font-semibold text-lg">
+                You Owe
+              </h2>
+            </div>
+
+            <div className="space-y-4">
+              {tasks
+                .filter(
+                  (task) =>
+                    task.category === "you_owe"
+                )
+                .map((task) => (
+                  <TaskCard
+                    key={task.id}
+                    task={task}
+                  />
+                ))}
+            </div>
+          </div>
+
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5">
+            <div className="flex items-center gap-2 mb-5">
+              <Clock3
+                className="text-yellow-400"
+                size={18}
+              />
+
+              <h2 className="font-semibold text-lg">
+                Waiting On
+              </h2>
+            </div>
+
+            <div className="space-y-4">
+              {tasks
+                .filter(
+                  (task) =>
+                    task.category ===
+                    "waiting_on"
+                )
+                .map((task) => (
+                  <TaskCard
+                    key={task.id}
+                    task={task}
+                  />
+                ))}
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
-  )
+  );
 }
+
+export default App;

@@ -11,45 +11,59 @@ client = OpenAI(
     api_key=os.getenv("OPENAI_API_KEY")
 )
 
-def extract_tasks(email_text: str):
+def extract_tasks(email):
 
-    prompt = f"""
-You are an AI assistant that extracts actionable tasks
-from emails.
-
-Extract tasks from the following email.
-
-Return ONLY valid JSON.
-
-Schema:
-
-[
-  {{
-    "title": "...",
-    "status": "...",
-    "category": "you_owe" or "waiting_on",
-    "priority": "low" | "medium" | "high"
-  }}
-]
-
-Email:
-
-{email_text}
-"""
+    print("EMAIL SENT TO LLM:")
+    print(email)
 
     response = client.chat.completions.create(
         model="gpt-4.1-mini",
         messages=[
             {
+                "role": "system",
+                "content": """
+You extract actionable tasks from emails.
+
+Return ONLY valid JSON.
+
+Format:
+[
+  {
+    "title": "...",
+    "status": "...",
+    "category": "you_owe",
+    "priority": "high"
+  }
+]
+"""
+            },
+            {
                 "role": "user",
-                "content": prompt
+                "content": email
             }
-        ],
-        temperature=0
+        ]
     )
 
     raw = response.choices[0].message.content
+
     print("RAW LLM RESPONSE:")
     print(raw)
 
-    return json.loads(raw)
+    if not raw:
+        print("EMPTY LLM RESPONSE")
+        return []
+
+    try:
+        parsed = json.loads(raw)
+
+        if not isinstance(parsed, list):
+            return []
+
+        return parsed
+
+    except Exception as e:
+
+        print("JSON PARSE ERROR")
+        print(e)
+
+        return []
