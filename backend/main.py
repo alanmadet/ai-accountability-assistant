@@ -3,6 +3,7 @@ from fastapi import Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from starlette.middleware.sessions import SessionMiddleware
+from models import ProcessedEmail
 
 import threading
 import time
@@ -92,7 +93,9 @@ async def login(request: Request):
 
     return await oauth.google.authorize_redirect(
         request,
-        redirect_uri
+        redirect_uri,
+        access_type="offline",
+        prompt="consent"
     )
 
 @app.get("/auth/callback")
@@ -208,7 +211,7 @@ def fetch_recent_emails(token):
     print("TOTAL GMAIL MESSAGES:")
     print(len(messages))
 
-    email_texts = []
+    emails = []
 
     for message in messages:
 
@@ -253,16 +256,22 @@ Body:
         print("EMAIL CONTENT:")
         print(email_content)
 
-        email_texts.append(email_content)
+        emails.append({
+            "gmail_message_id": message["id"],
+            "content": email_content
+        })
 
-    return email_texts
+    return emails
 
 @app.get("/tasks")
 def get_tasks():
 
     db: Session = SessionLocal()
 
-    tasks = db.query(Task).all()
+    tasks = db.query(Task).filter(
+    Task.is_completed == False,
+    Task.is_hidden == False
+    ).all()
 
     result = []
 
@@ -273,7 +282,9 @@ def get_tasks():
             "title": task.title,
             "status": task.status,
             "category": task.category,
-            "priority": task.priority
+            "priority": task.priority,
+            "is_completed": task.is_completed,
+            "is_hidden": task.is_hidden,
         })
 
     db.close()
@@ -301,28 +312,54 @@ def process_sync(job_id: str, token):
         "fetching_emails"
     )
 
-
-    email_texts = fetch_recent_emails(token)
+    emails = fetch_recent_emails(token)
 
     update_job_status(
         job_id,
         "filtering_threads"
     )
 
-
     update_job_status(
         job_id,
         "extracting_tasks"
     )
 
-
     db: Session = SessionLocal()
 
-    for email in email_texts:
+    for email_data in emails:
 
-        extracted_tasks = extract_tasks(email)
+        existing_email = db.query(
+            ProcessedEmail
+        ).filter(
+            ProcessedEmail.gmail_message_id
+            == email_data["gmail_message_id"]
+        ).first()
+
+        if existing_email:
+
+            print(
+                "SKIPPING ALREADY PROCESSED EMAIL"
+            )
+
+            continue
+
+        extracted_tasks = extract_tasks(
+            email_data["content"]
+        )
 
         for task_data in extracted_tasks:
+
+            existing_task = db.query(Task).filter(
+                Task.title == task_data["title"]
+            ).first()
+
+            if existing_task:
+
+                print(
+                    "SKIPPING DUPLICATE TASK"
+                )
+
+                continue
 
             task = Task(
                 id=str(uuid.uuid4()),
@@ -334,6 +371,15 @@ def process_sync(job_id: str, token):
 
             db.add(task)
 
+        processed_email = ProcessedEmail(
+            id=str(uuid.uuid4()),
+            gmail_message_id=email_data[
+                "gmail_message_id"
+            ]
+        )
+
+        db.add(processed_email)
+
     db.commit()
 
     db.close()
@@ -342,8 +388,6 @@ def process_sync(job_id: str, token):
         job_id,
         "generating_summary"
     )
-
-    time.sleep(2)
 
     update_job_status(
         job_id,
@@ -413,3 +457,67 @@ def get_sync_status(job_id: str):
     db.close()
 
     return result
+
+@app.post("/tasks/{task_id}/complete")
+def complete_task(task_id: str):
+
+    db: Session = SessionLocal()
+
+    task = db.query(Task).filter(
+        Task.id == task_id
+    ).first()
+
+    if not task:
+
+        db.close()
+
+        return {
+            "error": "Task not found"
+        }
+
+    task.is_completed = True
+
+    db.commit()
+
+    db.close()
+
+    return {
+        "success": True
+    }
+
+
+@app.post("/tasks/{task_id}/hide")
+def hide_task(task_id: str):
+
+    db: Session = SessionLocal()
+
+    task = db.query(Task).filter(
+        Task.id == task_id
+    ).first()
+
+    if not task:
+
+        db.close()
+
+        return {
+            "error": "Task not found"
+        }
+
+    task.is_hidden = True
+
+    db.commit()
+
+    db.close()
+
+    return {
+        "success": True
+    }
+
+@app.post("/auth/logout")
+async def logout(request: Request):
+
+    request.session.clear()
+
+    return {
+        "success": True
+    }

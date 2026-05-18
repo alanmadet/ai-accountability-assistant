@@ -18,6 +18,58 @@ function App() {
   const [isAuthenticated, setIsAuthenticated] =
     useState<boolean | null>(null);
 
+    async function handleLogout() {
+      try {
+        await fetch(
+          "http://localhost:8000/auth/logout",
+          {
+            method: "POST",
+            credentials: "include",
+          }
+        );
+    
+        window.location.href = "/";
+      } catch (error) {
+        console.error(error);
+      }
+    }
+
+    async function handleCompleteTask(
+      taskId: string
+    ) {
+      try {
+        await fetch(
+          `http://localhost:8000/tasks/${taskId}/complete`,
+          {
+            method: "POST",
+            credentials: "include",
+          }
+        );
+    
+        loadTasks();
+      } catch (error) {
+        console.error(error);
+      }
+    }
+    
+    async function handleHideTask(
+      taskId: string
+    ) {
+      try {
+        await fetch(
+          `http://localhost:8000/tasks/${taskId}/hide`,
+          {
+            method: "POST",
+            credentials: "include",
+          }
+        );
+    
+        loadTasks();
+      } catch (error) {
+        console.error(error);
+      }
+    }
+
   async function checkAuthStatus() {
     try {
       const response = await fetch(
@@ -153,20 +205,29 @@ function App() {
             </p>
           </div>
 
-          <button
-            onClick={handleRefreshInbox}
-            disabled={syncing}
-            className="bg-blue-500 hover:bg-blue-600 disabled:opacity-50 transition px-5 py-3 rounded-xl flex items-center gap-2 font-medium"
-          >
-            <RefreshCw
-              size={18}
-              className={syncing ? "animate-spin" : ""}
-            />
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleLogout}
+              className="bg-zinc-800 hover:bg-zinc-700 transition px-4 py-3 rounded-xl text-sm"
+            >
+              Logout
+            </button>
 
-            {syncing
-              ? "Syncing..."
-              : "Refresh Inbox"}
-          </button>
+            <button
+              onClick={handleRefreshInbox}
+              disabled={syncing}
+              className="bg-blue-500 hover:bg-blue-600 disabled:opacity-50 transition px-5 py-3 rounded-xl flex items-center gap-2 font-medium"
+            >
+              <RefreshCw
+                size={18}
+                className={syncing ? "animate-spin" : ""}
+              />
+
+              {syncing
+                ? "Syncing..."
+                : "Refresh Inbox"}
+            </button>
+          </div>
         </div>
 
         {syncStatus && (
@@ -211,6 +272,8 @@ function App() {
                   <TaskCard
                     key={task.id}
                     task={task}
+                    onComplete={handleCompleteTask}
+                    onHide={handleHideTask}
                   />
                 ))}
             </div>
@@ -239,6 +302,8 @@ function App() {
                   <TaskCard
                     key={task.id}
                     task={task}
+                    onComplete={handleCompleteTask}
+                    onHide={handleHideTask}
                   />
                 ))}
             </div>

@@ -22,7 +22,7 @@ def extract_tasks(email):
             {
                 "role": "system",
                 "content": """
-You extract actionable tasks from emails.
+You extract actionable tasks from emails. If I need to do something put it on the I owe category, if someone owes me something or I'm waiting on something then put it on the waiting on section
 
 Return ONLY valid JSON.
 
