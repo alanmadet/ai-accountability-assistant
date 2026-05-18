@@ -4,8 +4,10 @@ export interface Task {
   status: string
 
   category:
-    | "waiting_on"
-    | "you_owe"
+  | "needs_reply"
+  | "waiting_on"
+  | "time_sensitive"
+  | "worth_reviewing";
 
   priority:
     | "low"

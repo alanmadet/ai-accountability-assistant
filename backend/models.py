@@ -23,6 +23,10 @@ class Task(Base):
         Boolean,
         default=False
     )
+    user_email = Column(
+    String,
+    nullable=False
+    )  
 
 class SyncJob(Base):
 
@@ -45,4 +49,9 @@ class ProcessedEmail(Base):
         String,
         unique=True,
         nullable=False
+    )
+
+    user_email = Column(
+    String,
+    nullable=False
     )

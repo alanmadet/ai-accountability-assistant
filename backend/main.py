@@ -104,6 +104,15 @@ async def auth_callback(request: Request):
     token = await oauth.google.authorize_access_token(
         request
     )
+    userinfo = token.get("userinfo")
+
+    request.session["user_email"] = (
+        userinfo["email"]
+    )
+
+    request.session["user_name"] = (
+        userinfo["name"]
+    )
 
     request.session["google_token"] = token
 
@@ -264,11 +273,16 @@ Body:
     return emails
 
 @app.get("/tasks")
-def get_tasks():
+def get_tasks(request: Request):
 
     db: Session = SessionLocal()
 
+    user_email = request.session.get(
+    "user_email"
+    )
+
     tasks = db.query(Task).filter(
+    Task.user_email == user_email,
     Task.is_completed == False,
     Task.is_hidden == False
     ).all()
@@ -305,7 +319,11 @@ def update_job_status(job_id: str, status: str):
 
     db.close()
 
-def process_sync(job_id: str, token):
+def process_sync(
+    job_id: str,
+    token,
+    user_email: str
+):
 
     update_job_status(
         job_id,
@@ -332,7 +350,9 @@ def process_sync(job_id: str, token):
             ProcessedEmail
         ).filter(
             ProcessedEmail.gmail_message_id
-            == email_data["gmail_message_id"]
+            == email_data["gmail_message_id"],
+            ProcessedEmail.user_email
+            == user_email
         ).first()
 
         if existing_email:
@@ -366,7 +386,8 @@ def process_sync(job_id: str, token):
                 title=task_data["title"],
                 status=task_data["status"],
                 category=task_data["category"],
-                priority=task_data["priority"]
+                priority=task_data["priority"],
+                user_email=user_email
             )
 
             db.add(task)
@@ -375,7 +396,8 @@ def process_sync(job_id: str, token):
             id=str(uuid.uuid4()),
             gmail_message_id=email_data[
                 "gmail_message_id"
-            ]
+            ],
+            user_email=user_email
         )
 
         db.add(processed_email)
@@ -424,7 +446,7 @@ async def start_sync(request: Request):
 
     thread = threading.Thread(
         target=process_sync,
-        args=(job_id, token)
+        args=(job_id, token, request.session["user_email"])
     )
 
     thread.start()
@@ -520,4 +542,27 @@ async def logout(request: Request):
 
     return {
         "success": True
+    }
+
+
+@app.get("/me")
+def get_me(request: Request):
+
+    user_email = request.session.get(
+        "user_email"
+    )
+
+    if not user_email:
+
+        return {
+            "authenticated": False
+        }
+
+    return {
+        "authenticated": True,
+        "email": user_email,
+        "name": request.session.get(
+            "user_name",
+            ""
+        )
     }
