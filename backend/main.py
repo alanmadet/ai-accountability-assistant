@@ -6,7 +6,6 @@ from starlette.middleware.sessions import SessionMiddleware
 from models import ProcessedEmail
 
 import threading
-import time
 import uuid
 import os
 
@@ -33,13 +32,16 @@ from fastapi.responses import RedirectResponse
 
 load_dotenv()
 
-app = FastAPI()
+FRONTEND_URL = os.getenv(
+    "FRONTEND_URL"
+)
 
-app.add_middleware(
-    SessionMiddleware,
-    secret_key="super-secret-key",
-    same_site="lax",
-    https_only=False
+BACKEND_URL = os.getenv(
+    "BACKEND_URL"
+)
+
+SESSION_SECRET = os.getenv(
+    "SESSION_SECRET"
 )
 
 GOOGLE_CLIENT_ID = os.getenv(
@@ -48,6 +50,15 @@ GOOGLE_CLIENT_ID = os.getenv(
 
 GOOGLE_CLIENT_SECRET = os.getenv(
     "GOOGLE_CLIENT_SECRET"
+)
+
+app = FastAPI()
+
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=SESSION_SECRET,
+    same_site="none",
+    https_only=False
 )
 
 SCOPES = [
@@ -73,7 +84,7 @@ Base.metadata.create_all(bind=engine)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5175"],
+    allow_origins=[FRONTEND_URL],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -84,11 +95,12 @@ app.add_middleware(
 def root():
     return {"message": "Backend running"}
 
+
 @app.get("/auth/login")
 async def login(request: Request):
 
     redirect_uri = (
-        "http://localhost:8000/auth/callback"
+        f"{BACKEND_URL}/auth/callback"
     )
 
     return await oauth.google.authorize_redirect(
@@ -98,27 +110,38 @@ async def login(request: Request):
         prompt="consent"
     )
 
+
 @app.get("/auth/callback")
 async def auth_callback(request: Request):
 
-    token = await oauth.google.authorize_access_token(
-        request
-    )
-    userinfo = token.get("userinfo")
+    try:
 
-    request.session["user_email"] = (
-        userinfo["email"]
-    )
+        token = await oauth.google.authorize_access_token(
+            request
+        )
 
-    request.session["user_name"] = (
-        userinfo["name"]
-    )
+        userinfo = token.get("userinfo")
 
-    request.session["google_token"] = token
+        request.session["user_email"] = (
+            userinfo["email"]
+        )
 
-    return RedirectResponse(
-    "http://localhost:5175"
-    )
+        request.session["user_name"] = (
+            userinfo["name"]
+        )
+
+        request.session["google_token"] = token
+
+        return RedirectResponse(
+            FRONTEND_URL
+        )
+
+    except Exception as e:
+
+        return {
+            "error": str(e)
+        }
+
 
 @app.get("/auth/status")
 async def auth_status(request: Request):
@@ -130,6 +153,7 @@ async def auth_status(request: Request):
     return {
         "authenticated": token is not None
     }
+
 
 @app.get("/gmail/messages")
 async def get_gmail_messages(request: Request):
@@ -196,6 +220,7 @@ async def get_gmail_messages(request: Request):
     return {
         "messages": detailed_messages
     }
+
 
 def fetch_recent_emails(token):
 
@@ -272,19 +297,20 @@ Body:
 
     return emails
 
+
 @app.get("/tasks")
 def get_tasks(request: Request):
 
     db: Session = SessionLocal()
 
     user_email = request.session.get(
-    "user_email"
+        "user_email"
     )
 
     tasks = db.query(Task).filter(
-    Task.user_email == user_email,
-    Task.is_completed == False,
-    Task.is_hidden == False
+        Task.user_email == user_email,
+        Task.is_completed == False,
+        Task.is_hidden == False
     ).all()
 
     result = []
@@ -305,6 +331,7 @@ def get_tasks(request: Request):
 
     return {"tasks": result}
 
+
 def update_job_status(job_id: str, status: str):
 
     db: Session = SessionLocal()
@@ -318,6 +345,7 @@ def update_job_status(job_id: str, status: str):
         db.commit()
 
     db.close()
+
 
 def process_sync(
     job_id: str,
@@ -416,6 +444,7 @@ def process_sync(
         "complete"
     )
 
+
 @app.post("/sync")
 async def start_sync(request: Request):
 
@@ -446,7 +475,11 @@ async def start_sync(request: Request):
 
     thread = threading.Thread(
         target=process_sync,
-        args=(job_id, token, request.session["user_email"])
+        args=(
+            job_id,
+            token,
+            request.session["user_email"]
+        )
     )
 
     thread.start()
@@ -454,6 +487,7 @@ async def start_sync(request: Request):
     return {
         "job_id": job_id
     }
+
 
 @app.get("/sync-status/{job_id}")
 def get_sync_status(job_id: str):
@@ -479,6 +513,7 @@ def get_sync_status(job_id: str):
     db.close()
 
     return result
+
 
 @app.post("/tasks/{task_id}/complete")
 def complete_task(task_id: str):
@@ -534,6 +569,7 @@ def hide_task(task_id: str):
     return {
         "success": True
     }
+
 
 @app.post("/auth/logout")
 async def logout(request: Request):

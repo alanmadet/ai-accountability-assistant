@@ -13,6 +13,9 @@ import {
 import TaskCard from "./components/TaskCard";
 import type { Task } from "./types/task";
 
+const API_URL =
+  import.meta.env.VITE_API_URL;
+
 function App() {
 
   const [tasks, setTasks] =
@@ -35,7 +38,7 @@ function App() {
     try {
 
       const response = await fetch(
-        "http://localhost:8000/me",
+        `${API_URL}/me`,
         {
           credentials: "include",
         }
@@ -56,7 +59,7 @@ function App() {
     try {
 
       await fetch(
-        "http://localhost:8000/auth/logout",
+        `${API_URL}/auth/logout`,
         {
           method: "POST",
           credentials: "include",
@@ -77,7 +80,7 @@ function App() {
     try {
 
       await fetch(
-        `http://localhost:8000/tasks/${taskId}/complete`,
+        `${API_URL}/tasks/${taskId}/complete`,
         {
           method: "POST",
           credentials: "include",
@@ -98,7 +101,7 @@ function App() {
     try {
 
       await fetch(
-        `http://localhost:8000/tasks/${taskId}/hide`,
+        `${API_URL}/tasks/${taskId}/hide`,
         {
           method: "POST",
           credentials: "include",
@@ -117,7 +120,7 @@ function App() {
     try {
 
       const response = await fetch(
-        "http://localhost:8000/auth/status",
+        `${API_URL}/auth/status`,
         {
           credentials: "include",
         }
@@ -143,7 +146,7 @@ function App() {
     try {
 
       const response = await fetch(
-        "http://localhost:8000/tasks",
+        `${API_URL}/tasks`,
         {
           credentials: "include",
         }
@@ -169,7 +172,7 @@ function App() {
         try {
 
           const response = await fetch(
-            `http://localhost:8000/sync-status/${jobId}`,
+            `${API_URL}/sync-status/${jobId}`,
             {
               credentials: "include",
             }
@@ -212,7 +215,7 @@ function App() {
       setSyncing(true);
 
       const response = await fetch(
-        "http://localhost:8000/sync",
+        `${API_URL}/sync`,
         {
           method: "POST",
           credentials: "include",
@@ -273,7 +276,7 @@ function App() {
     function handleLogin() {
 
       window.location.href =
-        "http://localhost:8000/auth/login";
+        `${API_URL}/auth/login`;
     }
 
     return (
