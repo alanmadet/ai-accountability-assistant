@@ -57,7 +57,7 @@ app = FastAPI()
 app.add_middleware(
     SessionMiddleware,
     secret_key=SESSION_SECRET,
-    same_site="none",
+    same_site="lax",
     https_only=False
 )
 

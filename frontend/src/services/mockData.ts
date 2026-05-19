@@ -5,14 +5,14 @@ export const focusItems: Task[] = [
     id: "1",
     title: "Reply to Sam about proposal",
     status: "Overdue · 2 days",
-    category: "you_owe",
+    category: "needs_reply",
     priority: "high"
   },
   {
     id: "2",
     title: "Submit HOA document",
     status: "Due tomorrow",
-    category: "you_owe",
+    category: "needs_reply",
     priority: "high"
   },
   {
