@@ -23,24 +23,25 @@ function TaskCard({
   onHide,
 }: Props) {
   return (
-    <div className="bg-zinc-800 rounded-xl p-4 border border-zinc-700">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h3 className="font-medium mb-2">
+    <div className="bg-zinc-800 rounded-xl p-4 border border-zinc-700 min-w-0">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+        
+        <div className="min-w-0 flex-1">
+          <h3 className="font-medium mb-2 break-words text-sm sm:text-base">
             {task.title}
           </h3>
 
-          <p className="text-sm text-zinc-400">
+          <p className="text-sm text-zinc-400 break-words">
             {task.status}
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           <button
             onClick={() =>
               onComplete(task.id)
             }
-            className="p-2 rounded-lg bg-green-500/20 hover:bg-green-500/30 transition"
+            className="p-2.5 rounded-lg bg-green-500/20 hover:bg-green-500/30 transition"
           >
             <Check
               size={16}
@@ -52,7 +53,7 @@ function TaskCard({
             onClick={() =>
               onHide(task.id)
             }
-            className="p-2 rounded-lg bg-zinc-700 hover:bg-zinc-600 transition"
+            className="p-2.5 rounded-lg bg-zinc-700 hover:bg-zinc-600 transition"
           >
             <EyeOff
               size={16}
@@ -60,6 +61,7 @@ function TaskCard({
             />
           </button>
         </div>
+
       </div>
     </div>
   );
