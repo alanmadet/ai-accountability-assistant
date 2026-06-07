@@ -13,6 +13,7 @@ import {
 import TaskCard from "./components/TaskCard";
 import type { Task } from "./types/task";
 
+
 const API_URL = import.meta.env.VITE_API_URL;
 
 function App() {

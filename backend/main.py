@@ -180,7 +180,7 @@ async def get_gmail_messages(request: Request):
 
     results = gmail.users().messages().list(
         userId="me",
-        maxResults=5
+        maxResults=50
     ).execute()
 
     messages = results.get("messages", [])
@@ -236,7 +236,7 @@ def fetch_recent_emails(token):
 
     results = gmail.users().messages().list(
         userId="me",
-        maxResults=5,
+        maxResults=200,
         q="newer_than:30d"
     ).execute()
 
@@ -292,7 +292,10 @@ Body:
 
         emails.append({
             "gmail_message_id": message["id"],
-            "content": email_content
+            "content": email_content,
+            "sender": sender,
+            "subject": subject,
+            "snippet": snippet
         })
 
     return emails
@@ -425,7 +428,10 @@ def process_sync(
             gmail_message_id=email_data[
                 "gmail_message_id"
             ],
-            user_email=user_email
+            user_email=user_email,
+            sender=email_data["sender"],
+            subject=email_data["subject"],
+            snippet=email_data["snippet"]
         )
 
         db.add(processed_email)
