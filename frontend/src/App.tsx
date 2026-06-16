@@ -8,9 +8,11 @@ import {
   LayoutDashboard,
   CheckCircle2,
   Settings,
+  Search,
 } from "lucide-react";
 
 import TaskCard from "./components/TaskCard";
+import SearchPanel from "./components/SearchPanel";
 import type { Task } from "./types/task";
 
 
@@ -23,6 +25,9 @@ function App() {
   const [syncStatus, setSyncStatus] = useState("");
   const [isAuthenticated, setIsAuthenticated] =
     useState<boolean | null>(null);
+  const [activeView, setActiveView] = useState<"dashboard" | "search">(
+    "dashboard"
+  );
 
   async function loadMe() {
     try {
@@ -373,9 +378,28 @@ function App() {
         </div>
 
         <nav className="space-y-2">
-          <button className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-zinc-800 text-white">
+          <button
+            onClick={() => setActiveView("dashboard")}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition ${
+              activeView === "dashboard"
+                ? "bg-zinc-800 text-white"
+                : "hover:bg-zinc-800 text-zinc-300"
+            }`}
+          >
             <LayoutDashboard size={18} />
             Dashboard
+          </button>
+
+          <button
+            onClick={() => setActiveView("search")}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition ${
+              activeView === "search"
+                ? "bg-zinc-800 text-white"
+                : "hover:bg-zinc-800 text-zinc-300"
+            }`}
+          >
+            <Search size={18} />
+            Search
           </button>
 
           <button className="w-full flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-zinc-800 transition text-zinc-300">
@@ -408,26 +432,26 @@ function App() {
               Beacon AI
             </h1>
 
-            <button
-              onClick={handleRefreshInbox}
-              disabled={syncing}
-              className="bg-blue-500 hover:bg-blue-600 disabled:opacity-50 transition px-4 py-2 rounded-xl flex items-center gap-2 text-sm"
-            >
-              <RefreshCw
-                size={16}
-                className={
-                  syncing
-                    ? "animate-spin"
-                    : ""
-                }
-              />
-
-              Refresh
-            </button>
+            {activeView === "dashboard" && (
+              <button
+                onClick={handleRefreshInbox}
+                disabled={syncing}
+                className="bg-blue-500 hover:bg-blue-600 disabled:opacity-50 transition px-4 py-2 rounded-xl flex items-center gap-2 text-sm"
+              >
+                <RefreshCw
+                  size={16}
+                  className={syncing ? "animate-spin" : ""}
+                />
+                Refresh
+              </button>
+            )}
           </div>
         </div>
 
-        <div className="p-4 md:p-8">
+        {activeView === "search" ? (
+          <SearchPanel />
+        ) : (
+        <div className="p-4 md:p-8 pb-24 md:pb-8">
           <div className="max-w-7xl mx-auto">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6 mb-10">
               <div className="min-w-0">
@@ -690,6 +714,30 @@ function App() {
               </div>
             </div>
           </div>
+        </div>
+        )}
+
+        {/* Mobile Bottom Tab Bar */}
+        <div className="md:hidden fixed bottom-0 left-0 right-0 border-t border-zinc-800 bg-zinc-950 flex">
+          <button
+            onClick={() => setActiveView("dashboard")}
+            className={`flex-1 flex flex-col items-center gap-1 py-3 text-xs transition ${
+              activeView === "dashboard" ? "text-white" : "text-zinc-500"
+            }`}
+          >
+            <LayoutDashboard size={20} />
+            Dashboard
+          </button>
+
+          <button
+            onClick={() => setActiveView("search")}
+            className={`flex-1 flex flex-col items-center gap-1 py-3 text-xs transition ${
+              activeView === "search" ? "text-white" : "text-zinc-500"
+            }`}
+          >
+            <Search size={20} />
+            Search
+          </button>
         </div>
       </div>
     </div>

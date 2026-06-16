@@ -182,3 +182,61 @@ def extract_tasks(email):
         print(e)
 
         return []
+
+
+def chunk_text(text: str, chunk_size: int = 1500, overlap: int = 150) -> list:
+
+    if not text or not text.strip():
+        return []
+
+    chunks = []
+    start = 0
+
+    while start < len(text):
+        end = min(start + chunk_size, len(text))
+        chunks.append(text[start:end])
+        if end == len(text):
+            break
+        start = end - overlap
+
+    return chunks
+
+
+def embed_text(text: str) -> list:
+
+    response = client.embeddings.create(
+        model="text-embedding-3-small",
+        input=text
+    )
+
+    return response.data[0].embedding
+
+
+def generate_answer(question: str, context_chunks: list) -> str:
+
+    context = "\n\n---\n\n".join(context_chunks)
+
+    response = client.chat.completions.create(
+        model="gpt-4.1-mini",
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You are Beacon, an AI assistant that helps users "
+                    "understand their email inbox. Answer the user's question "
+                    "using ONLY the email context provided. If the answer "
+                    "cannot be found in the provided emails, say so clearly. "
+                    "Be concise and direct."
+                )
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Context (emails from inbox):\n\n{context}"
+                    f"\n\nQuestion: {question}"
+                )
+            }
+        ]
+    )
+
+    return response.choices[0].message.content

@@ -4,14 +4,19 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from starlette.middleware.sessions import SessionMiddleware
 from models import ProcessedEmail
+from models import EmailChunk
+
+from pydantic import BaseModel
 
 import threading
 import uuid
 import os
+import base64
 
 os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 from database import SessionLocal
 from database import engine
@@ -21,6 +26,9 @@ from models import Task
 from models import SyncJob
 
 from ai_service import extract_tasks
+from ai_service import chunk_text
+from ai_service import embed_text
+from ai_service import generate_answer
 
 from dotenv import load_dotenv
 
@@ -80,7 +88,15 @@ oauth.register(
     }
 )
 
+with engine.connect() as conn:
+    conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+    conn.commit()
+
 Base.metadata.create_all(bind=engine)
+
+
+class AskRequest(BaseModel):
+    question: str
 
 app.add_middleware(
     CORSMiddleware,
@@ -222,6 +238,33 @@ async def get_gmail_messages(request: Request):
     }
 
 
+def extract_email_body(payload: dict) -> str:
+
+    mime_type = payload.get("mimeType", "")
+
+    if mime_type == "text/plain":
+        data = payload.get("body", {}).get("data", "")
+        if data:
+            return base64.urlsafe_b64decode(
+                data + "=="
+            ).decode("utf-8", errors="ignore")
+
+    for part in payload.get("parts", []):
+        if part.get("mimeType") == "text/plain":
+            data = part.get("body", {}).get("data", "")
+            if data:
+                return base64.urlsafe_b64decode(
+                    data + "=="
+                ).decode("utf-8", errors="ignore")
+
+    for part in payload.get("parts", []):
+        body = extract_email_body(part)
+        if body:
+            return body
+
+    return ""
+
+
 def fetch_recent_emails(token):
 
     credentials = Credentials(
@@ -236,7 +279,7 @@ def fetch_recent_emails(token):
 
     results = gmail.users().messages().list(
         userId="me",
-        maxResults=200,
+        maxResults=100,
         q="newer_than:30d"
     ).execute()
 
@@ -278,13 +321,17 @@ def fetch_recent_emails(token):
             "No preview available"
         )
 
+        body = extract_email_body(
+            msg["payload"]
+        ) or snippet
+
         email_content = f"""
 Subject: {subject}
 
 From: {sender}
 
 Body:
-{snippet}
+{body}
 """
 
         print("EMAIL CONTENT:")
@@ -295,7 +342,8 @@ Body:
             "content": email_content,
             "sender": sender,
             "subject": subject,
-            "snippet": snippet
+            "snippet": snippet,
+            "body": body
         })
 
     return emails
@@ -423,18 +471,45 @@ def process_sync(
 
             db.add(task)
 
+        email_id = str(uuid.uuid4())
+
         processed_email = ProcessedEmail(
-            id=str(uuid.uuid4()),
+            id=email_id,
             gmail_message_id=email_data[
                 "gmail_message_id"
             ],
             user_email=user_email,
             sender=email_data["sender"],
             subject=email_data["subject"],
-            snippet=email_data["snippet"]
+            snippet=email_data["snippet"],
+            body=email_data["body"]
         )
 
         db.add(processed_email)
+        db.flush()
+
+        chunks = chunk_text(email_data["body"])
+
+        for i, chunk in enumerate(chunks):
+
+            chunk_content = (
+                f"Subject: {email_data['subject']}\n"
+                f"From: {email_data['sender']}\n\n"
+                f"{chunk}"
+            )
+
+            embedding = embed_text(chunk_content)
+
+            email_chunk = EmailChunk(
+                id=str(uuid.uuid4()),
+                processed_email_id=email_id,
+                user_email=user_email,
+                chunk_index=i,
+                content=chunk_content,
+                embedding=embedding
+            )
+
+            db.add(email_chunk)
 
     db.commit()
 
@@ -585,6 +660,110 @@ async def logout(request: Request):
     return {
         "success": True
     }
+
+
+@app.get("/search")
+def semantic_search(query: str, request: Request, limit: int = 10):
+
+    user_email = request.session.get("user_email")
+
+    if not user_email:
+        return {"error": "Not authenticated"}
+
+    query_embedding = embed_text(query)
+
+    db: Session = SessionLocal()
+
+    try:
+
+        chunks = db.query(EmailChunk).filter(
+            EmailChunk.user_email == user_email
+        ).order_by(
+            EmailChunk.embedding.cosine_distance(query_embedding)
+        ).limit(limit * 3).all()
+
+        results = []
+        seen_email_ids = set()
+
+        for chunk in chunks:
+
+            if chunk.processed_email_id in seen_email_ids:
+                continue
+
+            seen_email_ids.add(chunk.processed_email_id)
+
+            email = db.query(ProcessedEmail).filter(
+                ProcessedEmail.id == chunk.processed_email_id
+            ).first()
+
+            results.append({
+                "email_id": chunk.processed_email_id,
+                "subject": email.subject if email else "",
+                "sender": email.sender if email else "",
+                "snippet": email.snippet if email else "",
+                "chunk_preview": chunk.content[:300]
+            })
+
+            if len(results) >= limit:
+                break
+
+        return {"results": results}
+
+    finally:
+        db.close()
+
+
+@app.post("/ask")
+def ask_inbox(body: AskRequest, request: Request):
+
+    user_email = request.session.get("user_email")
+
+    if not user_email:
+        return {"error": "Not authenticated"}
+
+    question_embedding = embed_text(body.question)
+
+    db: Session = SessionLocal()
+
+    try:
+
+        chunks = db.query(EmailChunk).filter(
+            EmailChunk.user_email == user_email
+        ).order_by(
+            EmailChunk.embedding.cosine_distance(question_embedding)
+        ).limit(5).all()
+
+        context_chunks = [chunk.content for chunk in chunks]
+
+        sources = []
+        seen = set()
+
+        for chunk in chunks:
+
+            if chunk.processed_email_id in seen:
+                continue
+
+            seen.add(chunk.processed_email_id)
+
+            email = db.query(ProcessedEmail).filter(
+                ProcessedEmail.id == chunk.processed_email_id
+            ).first()
+
+            if email:
+                sources.append({
+                    "subject": email.subject,
+                    "sender": email.sender
+                })
+
+        answer = generate_answer(body.question, context_chunks)
+
+        return {
+            "answer": answer,
+            "sources": sources
+        }
+
+    finally:
+        db.close()
 
 
 @app.get("/me")

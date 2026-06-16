@@ -2,6 +2,10 @@ from sqlalchemy import Column
 from sqlalchemy import String
 from sqlalchemy import Boolean
 from sqlalchemy import Text
+from sqlalchemy import Integer
+from sqlalchemy import ForeignKey
+
+from pgvector.sqlalchemy import Vector
 
 from database import Base
 
@@ -67,6 +71,29 @@ class ProcessedEmail(Base):
     subject = Column(String)
 
     snippet = Column(Text)
+
+    body = Column(Text)
+
+
+class EmailChunk(Base):
+
+    __tablename__ = "email_chunks"
+
+    id = Column(String, primary_key=True)
+
+    processed_email_id = Column(
+        String,
+        ForeignKey("processed_emails.id"),
+        nullable=False
+    )
+
+    user_email = Column(String, nullable=False)
+
+    chunk_index = Column(Integer, nullable=False)
+
+    content = Column(Text, nullable=False)
+
+    embedding = Column(Vector(1536))
 
 
 class Insight(Base):

@@ -5,8 +5,10 @@ frontend/dist
 # backend
 backend/venv
 backend/__pycache__
-backend/tasks.db
+backend/*.db
 backend/.env
+backend/.env.*
+backend/.vscode/
 
 # macOS
 .DS_Store

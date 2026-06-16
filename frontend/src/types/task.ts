@@ -14,3 +14,16 @@ export interface Task {
     | "medium"
     | "high"
 }
+
+export interface SearchResult {
+  email_id: string
+  subject: string
+  sender: string
+  snippet: string
+  chunk_preview: string
+}
+
+export interface AskSource {
+  subject: string
+  sender: string
+}
