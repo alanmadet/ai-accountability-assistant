@@ -352,7 +352,8 @@ app.add_middleware(
     SessionMiddleware,
     secret_key=SESSION_SECRET,
     same_site="none",
-    https_only=True
+    https_only=True,
+    max_age=30 * 24 * 60 * 60
 )
 
 _allowed_origins = list({
