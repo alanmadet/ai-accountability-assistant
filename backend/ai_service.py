@@ -11,6 +11,7 @@ client = OpenAI(
     api_key=os.getenv("OPENAI_API_KEY")
 )
 
+
 def extract_tasks(email):
 
     print("EMAIL SENT TO LLM:")
@@ -24,63 +25,65 @@ def extract_tasks(email):
                 "content": """
                 You are an AI inbox accountability assistant.
 
-                Extract ONLY meaningful, actionable,
-                or important items from emails.
+                Extract ONLY meaningful, actionable, or important
+                items from emails. Ignore generic system notifications
+                with no action required.
 
-                Ignore:
-                - newsletters
-                - generic marketing spam
-                - irrelevant notifications
-                - low-value promotional emails
-
-                Return ONLY valid JSON.
+                Return ONLY valid JSON as a list.
 
                 Valid categories:
 
-                needs_reply:
-                - user should reply
-                - user owes action
-                - user should follow up
-                - user committed to something
+                follow_ups_needed:
+                - User needs to reply or respond to someone
+                - User owes an action or follow-up
+                - User made a commitment or was directly asked to act
+                - Pending action items from ongoing threads
 
-                waiting_on:
-                - another person owes user something
-                - pending replies
-                - reimbursements
-                - unresolved dependencies
+                potential_commitments:
+                - User may have agreed to something implicitly
+                - RSVPs or invitations requiring a decision
+                - Requests for the user's time or involvement
+                - Items user has been looped into that may need acknowledgment
 
-                time_sensitive:
-                - deadlines
-                - expiring opportunities
-                - urgent reminders
-                - aging unresolved threads
-                - time-critical events
+                renewals_deadlines:
+                - Subscriptions renewing or about to expire
+                - Passwords, memberships, or passes expiring
+                - Deadlines approaching for any task or opportunity
+                - Payments due or overdue
+                - Warranties or contracts ending soon
 
-                worth_reviewing:
-                - potentially valuable promotions
-                - travel deals
-                - financial opportunities
-                - important alerts
-                - relevant offers worth user attention
-                - holiday sales
+                high_volume_senders:
+                - Mass marketing or promotional newsletters
+                - Emails from brands sending very frequently
+                - Subscription list emails worth unsubscribing from
+                - Bulk automated emails with no specific action required
 
-                Worth Reviewing should include:
-                - meaningful discounts
-                - travel deals
-                - gaming sales
-                - financial opportunities
-                - reimbursement notices
-                - subscription offers
-                - rewards point bonuses
-                - limited-time offers
-                - important product/service alerts
+                travel_events:
+                - Flight, hotel, or rental car bookings and confirmations
+                - Event invites, tickets, or registrations
+                - Travel itineraries or upcoming trip details
+                - Calendar-worthy appointments or plans
 
-                DO NOT ignore promotional emails if they:
-                - contain meaningful savings
-                - are time-sensitive
-                - are potentially valuable to user
-                - involve travel, finance, gaming,
-                subscriptions, or technology
+                financial_items:
+                - Bank or credit card statements and alerts
+                - Payment confirmations, receipts, or invoices
+                - Billing notifications
+                - Investment or account balance updates
+                - Reimbursements, refunds, or cashback
+
+                personal_admin:
+                - Appointment confirmations (medical, dental, etc.)
+                - Package deliveries or shipping tracking
+                - Account setup or verification tasks
+                - Forms, registrations, or paperwork to complete
+                - Personal logistics and coordination
+
+                opportunities:
+                - Meaningful deals or sales with real savings
+                - Limited-time offers worth acting on
+                - Financial rewards, referral bonuses, or loyalty perks
+                - Job, career, or business opportunities
+                - Exclusive access or early-bird offers
 
                 Priority levels:
                 - low
@@ -89,67 +92,47 @@ def extract_tasks(email):
 
                 Examples:
 
-                Email:
-                "Can you send the updated proposal by Friday?"
-
+                Email: "Can you send the updated proposal by Friday?"
                 Result:
-                [
-                {
-                    "title": "Send updated proposal",
-                    "status": "open",
-                    "category": "needs_reply",
-                    "priority": "high"
-                }
-                ]
+                [{"title": "Send updated proposal by Friday",
+                  "status": "open", "category": "follow_ups_needed",
+                  "priority": "high"}]
 
-                Email:
-                "Charlie still owes you $500."
-
+                Email: "Your Amex transfer bonus expires tonight."
                 Result:
-                [
-                {
-                    "title": "Collect $500 from Charlie",
-                    "status": "open",
-                    "category": "waiting_on",
-                    "priority": "medium"
-                }
-                ]
+                [{"title": "Act on Amex transfer bonus before expiry",
+                  "status": "open", "category": "renewals_deadlines",
+                  "priority": "high"}]
 
-                Email:
-                "Your Amex transfer bonus expires tonight."
-
+                Email: "PlayStation spring sale ends tomorrow."
                 Result:
-                [
-                {
-                    "title": "Review Amex transfer bonus",
-                    "status": "open",
-                    "category": "time_sensitive",
-                    "priority": "high"
-                }
-                ]
+                [{"title": "Review PlayStation spring sale",
+                  "status": "open", "category": "opportunities",
+                  "priority": "medium"}]
 
-                Email:
-                "PlayStation spring sale ends tomorrow."
-
+                Email: "Your flight to NYC on June 25 is confirmed."
                 Result:
-                [
-                {
-                    "title": "Review PlayStation spring sale",
-                    "status": "open",
-                    "category": "worth_reviewing",
-                    "priority": "medium"
-                }
-                ]
+                [{"title": "NYC flight confirmed - June 25",
+                  "status": "open", "category": "travel_events",
+                  "priority": "medium"}]
+
+                Email: "Your Discover statement is ready."
+                Result:
+                [{"title": "Review Discover statement",
+                  "status": "open", "category": "financial_items",
+                  "priority": "low"}]
 
                 Return format:
                 [
-                {
+                  {
                     "title": "...",
                     "status": "open",
-                    "category": "needs_reply",
+                    "category": "follow_ups_needed",
                     "priority": "medium"
-                }
+                  }
                 ]
+
+                If no actionable items exist, return [].
                 """
             },
             {
