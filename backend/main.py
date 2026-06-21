@@ -64,15 +64,18 @@ oauth.register(
 with engine.connect() as conn:
     try:
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        conn.commit()
     except Exception as e:
         print(f"pgvector not available, skipping: {e}")
         conn.rollback()
+
+Base.metadata.create_all(bind=engine)
+
+with engine.connect() as conn:
     conn.execute(text(
         "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP"
     ))
     conn.commit()
-
-Base.metadata.create_all(bind=engine)
 
 scheduler = BackgroundScheduler()
 
