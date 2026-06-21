@@ -35,6 +35,7 @@ from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request as GoogleRequest
 
+load_dotenv(".env.aws", override=True)
 load_dotenv()
 
 FRONTEND_URL = os.getenv("FRONTEND_URL")
