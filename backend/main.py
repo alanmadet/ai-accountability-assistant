@@ -62,7 +62,11 @@ oauth.register(
 )
 
 with engine.connect() as conn:
-    conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+    try:
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+    except Exception as e:
+        print(f"pgvector not available, skipping: {e}")
+        conn.rollback()
     conn.execute(text(
         "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP"
     ))
