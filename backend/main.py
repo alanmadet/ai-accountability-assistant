@@ -338,9 +338,15 @@ app.add_middleware(
     https_only=True
 )
 
+_allowed_origins = list({
+    FRONTEND_URL,
+    "https://beacon-ai-assistant.com",
+    "https://www.beacon-ai-assistant.com",
+})
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[FRONTEND_URL],
+    allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
