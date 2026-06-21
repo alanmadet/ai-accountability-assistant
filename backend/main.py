@@ -69,7 +69,17 @@ with engine.connect() as conn:
         print(f"pgvector not available, skipping: {e}")
         conn.rollback()
 
-Base.metadata.create_all(bind=engine)
+try:
+    Base.metadata.create_all(bind=engine)
+except Exception as e:
+    print(f"create_all failed (pgvector likely missing): {e}")
+    for table in Base.metadata.sorted_tables:
+        if table.name == "email_chunks":
+            continue
+        try:
+            table.create(bind=engine, checkfirst=True)
+        except Exception as te:
+            print(f"Failed to create table {table.name}: {te}")
 
 with engine.connect() as conn:
     conn.execute(text(
