@@ -1,16 +1,29 @@
 export interface Task {
-  id: string
-  title: string
-  status: string
+  id: string;
+  title: string;
+  status: string;
+  category: string;
+  priority: "low" | "medium" | "high";
+  is_completed?: boolean;
+  is_hidden?: boolean;
+  completed_at?: string | null;
+}
 
-  category:
-  | "needs_reply"
-  | "waiting_on"
-  | "time_sensitive"
-  | "worth_reviewing";
+export interface SearchResult {
+  email_id: string;
+  subject: string;
+  sender: string;
+  snippet: string;
+  chunk_preview: string;
+}
 
-  priority:
-    | "low"
-    | "medium"
-    | "high"
+export interface AskSource {
+  subject: string;
+  sender: string;
+}
+
+export interface UserSettings {
+  auto_sync_enabled: boolean;
+  sync_frequency_hours: number;
+  sync_email_count: number;
 }
