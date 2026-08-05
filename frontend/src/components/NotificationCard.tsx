@@ -65,14 +65,14 @@ function NotificationCard({
             </p>
           )}
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-2 flex-nowrap overflow-x-auto no-scrollbar sm:flex-wrap sm:overflow-visible -mx-1 px-1 py-0.5">
             {canDraftReply && onDraftReply && (
               <button
                 onClick={(e) => {
                   stop(e);
                   onDraftReply(notification.id);
                 }}
-                className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-indigo-500/15 text-indigo-300 ring-1 ring-indigo-500/20 hover:bg-indigo-500/25 hover:ring-indigo-500/40 transition"
+                className="shrink-0 inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-indigo-500/15 text-indigo-300 ring-1 ring-indigo-500/20 hover:bg-indigo-500/25 hover:ring-indigo-500/40 transition"
               >
                 <PenLine size={12} />
                 Draft Reply
@@ -85,7 +85,7 @@ function NotificationCard({
                 target="_blank"
                 rel="noreferrer"
                 onClick={stop}
-                className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-zinc-800/70 text-zinc-300 hover:bg-zinc-700/80 transition"
+                className="shrink-0 inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-zinc-800/70 text-zinc-300 hover:bg-zinc-700/80 transition"
               >
                 <Mail size={12} />
                 {config.openLabel}
@@ -98,7 +98,7 @@ function NotificationCard({
                 target="_blank"
                 rel="noreferrer"
                 onClick={stop}
-                className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-zinc-800/70 text-zinc-300 hover:bg-zinc-700/80 transition"
+                className="shrink-0 inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-zinc-800/70 text-zinc-300 hover:bg-zinc-700/80 transition"
               >
                 <CalendarPlus size={12} />
                 Add to Calendar
@@ -111,7 +111,7 @@ function NotificationCard({
                 target="_blank"
                 rel="noreferrer"
                 onClick={stop}
-                className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-zinc-800/70 text-zinc-300 hover:bg-zinc-700/80 transition"
+                className="shrink-0 inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-zinc-800/70 text-zinc-300 hover:bg-zinc-700/80 transition"
               >
                 <BellOff size={12} />
                 Unsubscribe
@@ -124,7 +124,7 @@ function NotificationCard({
                   stop(e);
                   onReopen(notification.id);
                 }}
-                className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-zinc-800/70 text-zinc-300 hover:bg-zinc-700/80 transition"
+                className="shrink-0 inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-zinc-800/70 text-zinc-300 hover:bg-zinc-700/80 transition"
               >
                 Reopen
               </button>
@@ -136,7 +136,7 @@ function NotificationCard({
                       stop(e);
                       onSnooze(notification.id);
                     }}
-                    className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-zinc-800/70 text-zinc-300 hover:bg-zinc-700/80 transition"
+                    className="shrink-0 inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-zinc-800/70 text-zinc-300 hover:bg-zinc-700/80 transition"
                   >
                     <Clock3 size={12} />
                     Snooze
@@ -149,7 +149,7 @@ function NotificationCard({
                       stop(e);
                       onDismiss(notification.id);
                     }}
-                    className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-zinc-800/70 text-zinc-400 hover:bg-zinc-700/80 hover:text-zinc-200 transition ml-auto"
+                    className="shrink-0 inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-zinc-800/70 text-zinc-400 hover:bg-zinc-700/80 hover:text-zinc-200 transition sm:ml-auto"
                   >
                     <X size={12} />
                     Dismiss

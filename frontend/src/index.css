@@ -34,3 +34,12 @@ body {
   background: color-mix(in oklab, var(--color-zinc-400) 50%, transparent);
   background-clip: padding-box;
 }
+
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}

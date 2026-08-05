@@ -14,6 +14,7 @@ import InsightItem from "./InsightItem";
 import Pagination from "./Pagination";
 import type { Notification, Insight } from "../types/notification";
 import { greeting } from "../utils/format";
+import { usePagedSection } from "../hooks/usePagedSection";
 
 const PAGE_SIZE = 5;
 
@@ -45,9 +46,6 @@ export default function Dashboard({
   onLogout,
 }: Props) {
   const [selected, setSelected] = useState<Notification | null>(null);
-  const [highPriorityPage, setHighPriorityPage] = useState(1);
-  const [upcomingPage, setUpcomingPage] = useState(1);
-  const [insightsPage, setInsightsPage] = useState(1);
 
   const highPriority = useMemo(
     () => notifications.filter((n) => n.urgency === "high_priority"),
@@ -71,32 +69,9 @@ export default function Dashboard({
     [notifications]
   );
 
-  const highPriorityPageSafe = Math.min(
-    highPriorityPage,
-    Math.max(1, Math.ceil(highPriority.length / PAGE_SIZE))
-  );
-  const highPriorityItems = highPriority.slice(
-    (highPriorityPageSafe - 1) * PAGE_SIZE,
-    highPriorityPageSafe * PAGE_SIZE
-  );
-
-  const upcomingPageSafe = Math.min(
-    upcomingPage,
-    Math.max(1, Math.ceil(upcoming.length / PAGE_SIZE))
-  );
-  const upcomingItems = upcoming.slice(
-    (upcomingPageSafe - 1) * PAGE_SIZE,
-    upcomingPageSafe * PAGE_SIZE
-  );
-
-  const insightsPageSafe = Math.min(
-    insightsPage,
-    Math.max(1, Math.ceil(insights.length / PAGE_SIZE))
-  );
-  const insightItems = insights.slice(
-    (insightsPageSafe - 1) * PAGE_SIZE,
-    insightsPageSafe * PAGE_SIZE
-  );
+  const hp = usePagedSection(highPriority, PAGE_SIZE);
+  const up = usePagedSection(upcoming, PAGE_SIZE);
+  const ai = usePagedSection(insights, PAGE_SIZE);
 
   const syncStatusLabel: Record<string, string> = {
     fetching_emails: "Fetching emails…",
@@ -163,7 +138,7 @@ export default function Dashboard({
         )}
 
         {/* High Priority */}
-        <section className="mb-8">
+        <section ref={hp.sectionRef} className="mb-8 scroll-mt-4">
           <div className="flex items-center gap-2.5 mb-4">
             <div className="p-1.5 rounded-lg bg-red-400/10 shadow-[0_0_16px_-6px_rgba(248,113,113,0.5)]">
               <AlertTriangle size={15} className="text-red-400" />
@@ -180,8 +155,12 @@ export default function Dashboard({
             <EmptyState text="Nothing urgent right now." />
           ) : (
             <>
-              <div className="space-y-3">
-                {highPriorityItems.map((n) => (
+              <div
+                className="space-y-3"
+                onTouchStart={hp.swipeHandlers.onTouchStart}
+                onTouchEnd={hp.swipeHandlers.onTouchEnd}
+              >
+                {hp.pageItems.map((n) => (
                   <NotificationCard
                     key={n.id}
                     notification={n}
@@ -195,17 +174,17 @@ export default function Dashboard({
                 ))}
               </div>
               <Pagination
-                page={highPriorityPageSafe}
+                page={hp.page}
                 pageSize={PAGE_SIZE}
                 total={highPriority.length}
-                onChange={setHighPriorityPage}
+                onChange={hp.goToPage}
               />
             </>
           )}
         </section>
 
         {/* Upcoming */}
-        <section className="mb-8">
+        <section ref={up.sectionRef} className="mb-8 scroll-mt-4">
           <div className="flex items-center gap-2.5 mb-4">
             <div className="p-1.5 rounded-lg bg-cyan-400/10 shadow-[0_0_16px_-6px_rgba(34,211,238,0.5)]">
               <CalendarClock size={15} className="text-cyan-400" />
@@ -222,8 +201,12 @@ export default function Dashboard({
             <EmptyState text="Nothing on the horizon." />
           ) : (
             <>
-              <div className="space-y-3">
-                {upcomingItems.map((n) => (
+              <div
+                className="space-y-3"
+                onTouchStart={up.swipeHandlers.onTouchStart}
+                onTouchEnd={up.swipeHandlers.onTouchEnd}
+              >
+                {up.pageItems.map((n) => (
                   <NotificationCard
                     key={n.id}
                     notification={n}
@@ -237,17 +220,17 @@ export default function Dashboard({
                 ))}
               </div>
               <Pagination
-                page={upcomingPageSafe}
+                page={up.page}
                 pageSize={PAGE_SIZE}
                 total={upcoming.length}
-                onChange={setUpcomingPage}
+                onChange={up.goToPage}
               />
             </>
           )}
         </section>
 
         {/* AI Insights */}
-        <section className="mb-8">
+        <section ref={ai.sectionRef} className="mb-8 scroll-mt-4">
           <div className="flex items-center gap-2.5 mb-3">
             <div className="p-1.5 rounded-lg bg-violet-400/10 shadow-[0_0_16px_-6px_rgba(167,139,250,0.5)]">
               <Sparkles size={15} className="text-violet-400" />
@@ -259,8 +242,12 @@ export default function Dashboard({
             <EmptyState text="No patterns worth flagging yet." />
           ) : (
             <>
-              <div className="bg-zinc-900/60 ring-1 ring-zinc-800 rounded-2xl px-5 divide-y divide-zinc-800/80">
-                {insightItems.map((insight) => (
+              <div
+                className="bg-zinc-900/60 ring-1 ring-zinc-800 rounded-2xl px-5 divide-y divide-zinc-800/80"
+                onTouchStart={ai.swipeHandlers.onTouchStart}
+                onTouchEnd={ai.swipeHandlers.onTouchEnd}
+              >
+                {ai.pageItems.map((insight) => (
                   <InsightItem
                     key={insight.id}
                     insight={insight}
@@ -269,10 +256,10 @@ export default function Dashboard({
                 ))}
               </div>
               <Pagination
-                page={insightsPageSafe}
+                page={ai.page}
                 pageSize={PAGE_SIZE}
                 total={insights.length}
-                onChange={setInsightsPage}
+                onChange={ai.goToPage}
               />
             </>
           )}

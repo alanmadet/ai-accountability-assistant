@@ -48,7 +48,10 @@ export function formatRelativeDays(iso: string | null): string | null {
 
 export function gmailUrl(gmailMessageId: string | null): string | null {
   if (!gmailMessageId) return null;
-  return `https://mail.google.com/mail/u/0/#all/${gmailMessageId}`;
+  // No hardcoded "/u/0/" account slot — on a phone with multiple Google
+  // accounts, slot 0 may not be the account Beacon is connected to, which
+  // silently lands on that account's inbox instead of the message.
+  return `https://mail.google.com/mail/#all/${gmailMessageId}`;
 }
 
 function pad(n: number): string {

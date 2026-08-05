@@ -6,13 +6,13 @@ import { fetchNotifications, reopenNotification } from "../services/api";
 import { getKindConfig } from "../constants/notificationKinds";
 import NotificationCard from "./NotificationCard";
 import Pagination from "./Pagination";
+import { usePagedSection } from "../hooks/usePagedSection";
 
 const PAGE_SIZE = 5;
 
 export default function CompletedPage() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState(1);
 
   async function loadCompleted() {
     setLoading(true);
@@ -40,19 +40,11 @@ export default function CompletedPage() {
   }, []);
 
   const kinds = [...new Set(notifications.map((n) => n.kind))];
-
-  const pageSafe = Math.min(
-    page,
-    Math.max(1, Math.ceil(notifications.length / PAGE_SIZE))
-  );
-  const pageItems = notifications.slice(
-    (pageSafe - 1) * PAGE_SIZE,
-    pageSafe * PAGE_SIZE
-  );
+  const paged = usePagedSection(notifications, PAGE_SIZE);
 
   return (
     <div className="p-4 md:p-8 pb-24 md:pb-8">
-      <div className="max-w-3xl mx-auto">
+      <section ref={paged.sectionRef} className="max-w-3xl mx-auto scroll-mt-4">
         {/* Header */}
         <div className="flex items-center gap-3 mb-2">
           <div className="p-2 rounded-xl bg-emerald-400/10 shadow-[0_0_18px_-6px_rgba(52,211,153,0.5)]">
@@ -107,8 +99,12 @@ export default function CompletedPage() {
 
         {!loading && notifications.length > 0 && (
           <>
-            <div className="space-y-3">
-              {pageItems.map((n) => (
+            <div
+              className="space-y-3"
+              onTouchStart={paged.swipeHandlers.onTouchStart}
+              onTouchEnd={paged.swipeHandlers.onTouchEnd}
+            >
+              {paged.pageItems.map((n) => (
                 <NotificationCard
                   key={n.id}
                   notification={n}
@@ -118,14 +114,14 @@ export default function CompletedPage() {
               ))}
             </div>
             <Pagination
-              page={pageSafe}
+              page={paged.page}
               pageSize={PAGE_SIZE}
               total={notifications.length}
-              onChange={setPage}
+              onChange={paged.goToPage}
             />
           </>
         )}
-      </div>
+      </section>
     </div>
   );
 }
