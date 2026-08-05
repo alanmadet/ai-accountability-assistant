@@ -37,6 +37,7 @@ export interface Notification {
   source_email_id: string | null;
   gmail_message_id: string | null;
   unsubscribe_url: string | null;
+  rfc822_message_id: string | null;
   status: NotificationStatus;
   snoozed_until: string | null;
   completed_at: string | null;
@@ -60,4 +61,5 @@ export interface EmailDetail {
   body: string;
   received_at: string | null;
   unsubscribe_url: string | null;
+  rfc822_message_id: string | null;
 }

@@ -51,6 +51,7 @@ class ProcessedEmail(Base):
     snippet = Column(Text)
     body = Column(Text)
     unsubscribe_url = Column(String, nullable=True)
+    rfc822_message_id = Column(String, nullable=True)
 
     thread_id = Column(String, nullable=True)
     received_at = Column(DateTime, nullable=True)

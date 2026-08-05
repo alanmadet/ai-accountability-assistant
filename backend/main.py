@@ -99,6 +99,7 @@ with engine.connect() as conn:
         "ALTER TABLE processed_emails ADD COLUMN IF NOT EXISTS thread_id VARCHAR",
         "ALTER TABLE processed_emails ADD COLUMN IF NOT EXISTS received_at TIMESTAMP",
         "ALTER TABLE processed_emails ADD COLUMN IF NOT EXISTS unsubscribe_url VARCHAR",
+        "ALTER TABLE processed_emails ADD COLUMN IF NOT EXISTS rfc822_message_id VARCHAR",
         "ALTER TABLE insights ADD COLUMN IF NOT EXISTS subject_key VARCHAR",
         "ALTER TABLE insights ADD COLUMN IF NOT EXISTS is_dismissed BOOLEAN DEFAULT FALSE",
         "ALTER TABLE insights ADD COLUMN IF NOT EXISTS created_at TIMESTAMP",
@@ -207,6 +208,7 @@ def fetch_recent_emails(token, max_results: int = 100):
         subject = ""
         sender = ""
         unsubscribe_url = ""
+        rfc822_message_id = ""
 
         for header in headers:
             if header["name"] == "Subject":
@@ -215,6 +217,8 @@ def fetch_recent_emails(token, max_results: int = 100):
                 sender = header["value"]
             if header["name"].lower() == "list-unsubscribe":
                 unsubscribe_url = extract_unsubscribe_url(header["value"])
+            if header["name"].lower() == "message-id":
+                rfc822_message_id = header["value"].strip().strip("<>")
 
         snippet = msg.get("snippet", "No preview available")
         body = extract_email_body(msg["payload"]) or snippet
@@ -242,7 +246,8 @@ def fetch_recent_emails(token, max_results: int = 100):
             "body": body,
             "thread_id": thread_id,
             "received_at": received_at,
-            "unsubscribe_url": unsubscribe_url
+            "unsubscribe_url": unsubscribe_url,
+            "rfc822_message_id": rfc822_message_id
         })
 
     return emails
@@ -387,7 +392,8 @@ def process_sync(
             body=email_data["body"],
             thread_id=email_data["thread_id"],
             received_at=email_data["received_at"],
-            unsubscribe_url=email_data["unsubscribe_url"] or None
+            unsubscribe_url=email_data["unsubscribe_url"] or None,
+            rfc822_message_id=email_data["rfc822_message_id"] or None
         )
         db.add(processed_email)
         db.flush()
@@ -766,6 +772,7 @@ def _serialize_notification(
     n: Notification,
     gmail_message_id: str = None,
     unsubscribe_url: str = None,
+    rfc822_message_id: str = None,
 ) -> dict:
     try:
         actions = json.loads(n.recommended_actions) if n.recommended_actions else []
@@ -787,6 +794,7 @@ def _serialize_notification(
         "source_email_id": n.source_email_id,
         "gmail_message_id": gmail_message_id,
         "unsubscribe_url": unsubscribe_url,
+        "rfc822_message_id": rfc822_message_id,
         "status": n.status,
         "snoozed_until": n.snoozed_until.isoformat() if n.snoozed_until else None,
         "completed_at": n.completed_at.isoformat() if n.completed_at else None,
@@ -848,6 +856,7 @@ def get_notifications(request: Request, status: str = "open"):
             n,
             email.gmail_message_id if email else None,
             email.unsubscribe_url if email else None,
+            email.rfc822_message_id if email else None,
         ))
 
     db.close()
@@ -976,6 +985,7 @@ def get_email(email_id: str, request: Request):
         "body": email.body,
         "received_at": email.received_at.isoformat() if email.received_at else None,
         "unsubscribe_url": email.unsubscribe_url,
+        "rfc822_message_id": email.rfc822_message_id,
     }
 
 

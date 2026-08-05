@@ -30,7 +30,7 @@ export default function NotificationModal({
   const config = getKindConfig(notification.kind);
   const Icon = config.icon;
   const deadlineLabel = formatDeadline(notification.deadline);
-  const emailUrl = gmailUrl(notification.gmail_message_id);
+  const emailUrl = gmailUrl(notification.gmail_message_id, notification.rfc822_message_id);
   const canDraftReply = notification.recommended_actions.includes("draft_reply");
   const calendarUrl = notification.recommended_actions.includes("add_to_calendar")
     ? googleCalendarUrl(notification.title, notification.deadline, notification.summary)

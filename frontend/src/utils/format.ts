@@ -46,7 +46,23 @@ export function formatRelativeDays(iso: string | null): string | null {
   return `${days} days ago`;
 }
 
-export function gmailUrl(gmailMessageId: string | null): string | null {
+export function gmailUrl(
+  gmailMessageId: string | null,
+  rfc822MessageId?: string | null
+): string | null {
+  // Prefer a search on the RFC 822 Message-ID: this is a real Gmail search
+  // operator, so it works whether the link opens in mobile Safari (web
+  // client) or gets hijacked by the Gmail app via iOS Universal Links (the
+  // app supports search natively; it doesn't run the web client's JS hash
+  // router at all, so "#all/{id}"-style links silently land on the inbox
+  // instead when opened through the app).
+  if (rfc822MessageId) {
+    // Not URL-encoded on purpose: Gmail's rfc822msgid search parses the
+    // hash fragment itself and expects the raw "local@domain" form —
+    // encodeURIComponent would turn "@" into "%40" and break the match.
+    return `https://mail.google.com/mail/#search/rfc822msgid:${rfc822MessageId}`;
+  }
+
   if (!gmailMessageId) return null;
   // No hardcoded "/u/0/" account slot — on a phone with multiple Google
   // accounts, slot 0 may not be the account Beacon is connected to, which
