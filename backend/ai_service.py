@@ -12,127 +12,98 @@ client = OpenAI(
 )
 
 
-def extract_tasks(email):
+def analyze_email(email: str, today: str) -> list:
 
     print("EMAIL SENT TO LLM:")
     print(email)
 
     response = client.chat.completions.create(
         model="gpt-4.1-mini",
+        response_format={"type": "json_object"},
         messages=[
             {
                 "role": "system",
-                "content": """
-                You are an AI inbox accountability assistant.
+                "content": f"""
+                You are Beacon, an AI executive assistant that reads a
+                user's email and decides whether it deserves the user's
+                attention today. You are not a classifier — you are
+                deciding what a good assistant would flag for their boss.
 
-                Extract ONLY meaningful, actionable, or important
-                items from emails. Ignore generic system notifications
-                with no action required.
+                Today's date is {today}. Use it to resolve relative dates
+                ("by Thursday", "in 2 weeks") into absolute ISO 8601
+                datetimes (YYYY-MM-DDTHH:MM:SS). If no specific deadline
+                is mentioned, deadline must be null.
 
-                Return ONLY valid JSON as a list.
+                Ask yourself for this email:
+                - Does the user need to act (reply, pay, complete a form)?
+                - Is someone waiting on the user's response?
+                - Is there a deadline, expiration, or time-sensitive window?
+                - Is this purely informational with nothing to do? If so,
+                  produce no notification for it.
+                - Could this matter later even if not urgent right now
+                  (e.g. a confirmed flight, an RSVP, a delivery)?
 
-                Valid categories:
+                For every item worth surfacing, output an object with:
+                - title: short, specific, human-readable (e.g.
+                  "Reply to recruiter about interview availability")
+                - summary: 1-2 sentence plain-language summary of the email
+                - reason: 1 sentence on why this deserves the user's
+                  attention right now (the "why this matters")
+                - kind: one of "recruiter", "bill", "medical", "deadline",
+                  "travel", "package", "event", "subscription",
+                  "reply_needed", "waiting_on", "other"
+                - urgency: "high_priority" if the user must act soon or
+                  someone is waiting on them; "upcoming" if it's
+                  time-relevant but not urgent yet (travel, reservations,
+                  returns, events)
+                - confidence: integer 0-100, how confident you are this
+                  genuinely deserves the user's attention
+                - deadline: ISO 8601 datetime or null
+                - recommended_actions: array, subset of
+                  ["draft_reply", "open_email", "snooze", "dismiss",
+                  "add_to_calendar"].
+                  Only include "draft_reply" if the user plausibly needs
+                  to write a reply. Only include "add_to_calendar" if
+                  deadline is set AND this represents something
+                  calendar-worthy — a flight, appointment, reservation,
+                  event, or a hard due date — not a vague or informational
+                  deadline.
 
-                follow_ups_needed:
-                - User needs to reply or respond to someone
-                - User owes an action or follow-up
-                - User made a commitment or was directly asked to act
-                - Pending action items from ongoing threads
+                Return ONLY valid JSON of the form:
+                {{"notifications": [ {{...}}, ... ]}}
 
-                potential_commitments:
-                - User may have agreed to something implicitly
-                - RSVPs or invitations requiring a decision
-                - Requests for the user's time or involvement
-                - Items user has been looped into that may need acknowledgment
+                If nothing in this email deserves attention, return
+                {{"notifications": []}}.
 
-                renewals_deadlines:
-                - Subscriptions renewing or about to expire
-                - Passwords, memberships, or passes expiring
-                - Deadlines approaching for any task or opportunity
-                - Payments due or overdue
-                - Warranties or contracts ending soon
-
-                high_volume_senders:
-                - Mass marketing or promotional newsletters
-                - Emails from brands sending very frequently
-                - Subscription list emails worth unsubscribing from
-                - Bulk automated emails with no specific action required
-
-                travel_events:
-                - Flight, hotel, or rental car bookings and confirmations
-                - Event invites, tickets, or registrations
-                - Travel itineraries or upcoming trip details
-                - Calendar-worthy appointments or plans
-
-                financial_items:
-                - Bank or credit card statements and alerts
-                - Payment confirmations, receipts, or invoices
-                - Billing notifications
-                - Investment or account balance updates
-                - Reimbursements, refunds, or cashback
-
-                personal_admin:
-                - Appointment confirmations (medical, dental, etc.)
-                - Package deliveries or shipping tracking
-                - Account setup or verification tasks
-                - Forms, registrations, or paperwork to complete
-                - Personal logistics and coordination
-
-                opportunities:
-                - Meaningful deals or sales with real savings
-                - Limited-time offers worth acting on
-                - Financial rewards, referral bonuses, or loyalty perks
-                - Job, career, or business opportunities
-                - Exclusive access or early-bird offers
-
-                Priority levels:
-                - low
-                - medium
-                - high
-
-                Examples:
+                Example:
 
                 Email: "Can you send the updated proposal by Friday?"
                 Result:
-                [{"title": "Send updated proposal by Friday",
-                  "status": "open", "category": "follow_ups_needed",
-                  "priority": "high"}]
+                {{"notifications": [
+                  {{"title": "Send updated proposal by Friday",
+                    "summary": "A colleague is asking for the updated proposal.",
+                    "reason": "You were directly asked to send this by a deadline.",
+                    "kind": "reply_needed",
+                    "urgency": "high_priority",
+                    "confidence": 90,
+                    "deadline": "2026-08-07T23:59:00",
+                    "recommended_actions": ["draft_reply", "open_email", "snooze", "dismiss"]}}
+                ]}}
 
-                Email: "Your Amex transfer bonus expires tonight."
-                Result:
-                [{"title": "Act on Amex transfer bonus before expiry",
-                  "status": "open", "category": "renewals_deadlines",
-                  "priority": "high"}]
-
-                Email: "PlayStation spring sale ends tomorrow."
-                Result:
-                [{"title": "Review PlayStation spring sale",
-                  "status": "open", "category": "opportunities",
-                  "priority": "medium"}]
+                Example:
 
                 Email: "Your flight to NYC on June 25 is confirmed."
                 Result:
-                [{"title": "NYC flight confirmed - June 25",
-                  "status": "open", "category": "travel_events",
-                  "priority": "medium"}]
-
-                Email: "Your Discover statement is ready."
-                Result:
-                [{"title": "Review Discover statement",
-                  "status": "open", "category": "financial_items",
-                  "priority": "low"}]
-
-                Return format:
-                [
-                  {
-                    "title": "...",
-                    "status": "open",
-                    "category": "follow_ups_needed",
-                    "priority": "medium"
-                  }
-                ]
-
-                If no actionable items exist, return [].
+                {{"notifications": [
+                  {{"title": "NYC flight confirmed for June 25",
+                    "summary": "Your flight booking to NYC on June 25 is confirmed.",
+                    "reason": "Upcoming travel worth keeping on your radar.",
+                    "kind": "travel",
+                    "urgency": "upcoming",
+                    "confidence": 80,
+                    "deadline": "2026-06-25T00:00:00",
+                    "recommended_actions": ["open_email", "dismiss", "add_to_calendar"]}}
+                ]}}
                 """
             },
             {
@@ -153,17 +124,102 @@ def extract_tasks(email):
 
     try:
         parsed = json.loads(raw)
+        notifications = parsed.get("notifications", [])
 
-        if not isinstance(parsed, list):
+        if not isinstance(notifications, list):
             return []
 
-        return parsed
+        return notifications
 
     except Exception as e:
 
         print("JSON PARSE ERROR")
         print(e)
 
+        return []
+
+
+def generate_reply_draft(email: str, notification_title: str) -> str:
+
+    response = client.chat.completions.create(
+        model="gpt-4.1-mini",
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You are Beacon, an AI executive assistant. Draft a "
+                    "short, professional reply to the email below on the "
+                    "user's behalf, addressing the following item: "
+                    f"\"{notification_title}\". Write only the reply body, "
+                    "no subject line, no placeholders in brackets unless "
+                    "truly necessary."
+                )
+            },
+            {
+                "role": "user",
+                "content": email
+            }
+        ]
+    )
+
+    return response.choices[0].message.content or ""
+
+
+def generate_insights(candidates: list) -> list:
+
+    if not candidates:
+        return []
+
+    response = client.chat.completions.create(
+        model="gpt-4.1-mini",
+        response_format={"type": "json_object"},
+        messages=[
+            {
+                "role": "system",
+                "content": """
+                You are Beacon, an AI executive assistant. You are given
+                candidate signals derived from a user's inbox history
+                (senders, message counts, days since last contact,
+                whether the user has replied). Pick the most relevant
+                ones (at most 8) and phrase them as natural, concise
+                insights a thoughtful assistant would mention, e.g.
+                "You haven't replied to Sarah in 11 days" or
+                "John has emailed you 4 times this week". Skip anything
+                that isn't actually interesting or actionable. Do not
+                invent facts not supported by the candidate data.
+
+                For each chosen insight, return an object with:
+                - title: the natural-language insight (one sentence)
+                - description: optional one more sentence of detail, or
+                  empty string
+                - insight_type: one of "relationship", "high_volume",
+                  "waiting_on"
+                - subject_key: the candidate's subject_key value, unchanged
+
+                Return ONLY valid JSON of the form:
+                {"insights": [ {...}, ... ]}
+                """
+            },
+            {
+                "role": "user",
+                "content": json.dumps(candidates)
+            }
+        ]
+    )
+
+    raw = response.choices[0].message.content
+
+    if not raw:
+        return []
+
+    try:
+        parsed = json.loads(raw)
+        insights = parsed.get("insights", [])
+        return insights if isinstance(insights, list) else []
+
+    except Exception as e:
+        print("INSIGHT JSON PARSE ERROR")
+        print(e)
         return []
 
 

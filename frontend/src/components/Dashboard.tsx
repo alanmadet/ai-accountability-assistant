@@ -1,96 +1,142 @@
-import { useState, useMemo } from "react";
-import { RefreshCw, Clock3, SlidersHorizontal, ArrowUpDown } from "lucide-react";
-
-import TaskCard from "./TaskCard";
-import type { Task } from "../types/task";
+import { useMemo, useState } from "react";
 import {
-  CATEGORY_CONFIG,
-  CATEGORY_ORDER,
-  getCategoryConfig,
-} from "../constants/categories";
+  RefreshCw,
+  Clock3,
+  AlertTriangle,
+  CalendarClock,
+  Sparkles,
+  CheckCircle2,
+} from "lucide-react";
 
-const API_URL = import.meta.env.VITE_API_URL;
+import NotificationCard from "./NotificationCard";
+import NotificationModal from "./NotificationModal";
+import InsightItem from "./InsightItem";
+import Pagination from "./Pagination";
+import type { Notification, Insight } from "../types/notification";
+import { greeting } from "../utils/format";
 
-const NEW_CATEGORIES = CATEGORY_ORDER.slice(0, 8);
+const PAGE_SIZE = 5;
 
 interface Props {
-  tasks: Task[];
+  notifications: Notification[];
+  insights: Insight[];
   syncing: boolean;
   syncStatus: string;
   userName: string;
   onRefresh: () => void;
-  onComplete: (taskId: string) => void;
-  onHide: (taskId: string) => void;
+  onComplete: (id: string) => void;
+  onDismiss: (id: string) => void;
+  onSnooze: (id: string) => void;
+  onDismissInsight: (id: string) => void;
   onLogout: () => void;
 }
 
 export default function Dashboard({
-  tasks,
+  notifications,
+  insights,
   syncing,
   syncStatus,
   userName,
   onRefresh,
   onComplete,
-  onHide,
+  onDismiss,
+  onSnooze,
+  onDismissInsight,
   onLogout,
 }: Props) {
-  const allCategories = useMemo(() => {
-    const inTasks = new Set(tasks.map((t) => t.category));
-    const ordered = CATEGORY_ORDER.filter(
-      (c) => NEW_CATEGORIES.includes(c) || inTasks.has(c)
-    );
-    return ordered;
-  }, [tasks]);
+  const [selected, setSelected] = useState<Notification | null>(null);
+  const [highPriorityPage, setHighPriorityPage] = useState(1);
+  const [upcomingPage, setUpcomingPage] = useState(1);
+  const [insightsPage, setInsightsPage] = useState(1);
 
-  const [hiddenCategories, setHiddenCategories] = useState<Set<string>>(
-    new Set()
+  const highPriority = useMemo(
+    () => notifications.filter((n) => n.urgency === "high_priority"),
+    [notifications]
   );
-  const [sortByCount, setSortByCount] = useState(false);
 
-  function toggleCategory(cat: string) {
-    setHiddenCategories((prev) => {
-      const next = new Set(prev);
-      next.has(cat) ? next.delete(cat) : next.add(cat);
-      return next;
-    });
-  }
+  const upcoming = useMemo(
+    () => notifications.filter((n) => n.urgency === "upcoming"),
+    [notifications]
+  );
 
-  const sortedCategories = useMemo(() => {
-    const visible = allCategories.filter((c) => !hiddenCategories.has(c));
-    if (!sortByCount) return visible;
-    return [...visible].sort(
-      (a, b) =>
-        tasks.filter((t) => t.category === b).length -
-        tasks.filter((t) => t.category === a).length
-    );
-  }, [allCategories, hiddenCategories, sortByCount, tasks]);
+  const recent = useMemo(
+    () =>
+      [...notifications]
+        .sort(
+          (a, b) =>
+            new Date(b.created_at ?? 0).getTime() -
+            new Date(a.created_at ?? 0).getTime()
+        )
+        .slice(0, 5),
+    [notifications]
+  );
+
+  const highPriorityPageSafe = Math.min(
+    highPriorityPage,
+    Math.max(1, Math.ceil(highPriority.length / PAGE_SIZE))
+  );
+  const highPriorityItems = highPriority.slice(
+    (highPriorityPageSafe - 1) * PAGE_SIZE,
+    highPriorityPageSafe * PAGE_SIZE
+  );
+
+  const upcomingPageSafe = Math.min(
+    upcomingPage,
+    Math.max(1, Math.ceil(upcoming.length / PAGE_SIZE))
+  );
+  const upcomingItems = upcoming.slice(
+    (upcomingPageSafe - 1) * PAGE_SIZE,
+    upcomingPageSafe * PAGE_SIZE
+  );
+
+  const insightsPageSafe = Math.min(
+    insightsPage,
+    Math.max(1, Math.ceil(insights.length / PAGE_SIZE))
+  );
+  const insightItems = insights.slice(
+    (insightsPageSafe - 1) * PAGE_SIZE,
+    insightsPageSafe * PAGE_SIZE
+  );
 
   const syncStatusLabel: Record<string, string> = {
     fetching_emails: "Fetching emails…",
     filtering_threads: "Filtering threads…",
-    extracting_tasks: "Extracting tasks…",
-    generating_summary: "Generating summary…",
+    extracting_tasks: "Analyzing emails…",
+    generating_summary: "Generating insights…",
     complete: "Sync complete",
   };
 
+  const firstName = userName?.split(" ")[0] || "there";
+  const attentionCount = highPriority.length + upcoming.length;
+
   return (
     <div className="p-4 md:p-8 pb-24 md:pb-8">
-      <div className="max-w-7xl mx-auto">
+      <div className="max-w-4xl mx-auto">
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6 mb-8">
           <div className="min-w-0">
-            <h1 className="text-3xl md:text-4xl font-bold break-words">
-              Hello {userName} 👋
+            <h1 className="text-3xl md:text-4xl font-bold break-words tracking-[-0.02em]">
+              {greeting()}, {firstName}
             </h1>
-            <p className="text-zinc-400 mt-1 text-base md:text-lg">
-              AI-powered inbox accountability dashboard
+            <p className="text-zinc-400 mt-1.5 text-base md:text-lg">
+              {attentionCount > 0 ? (
+                <>
+                  You have{" "}
+                  <span className="text-zinc-200 font-medium">
+                    {attentionCount} item{attentionCount === 1 ? "" : "s"}
+                  </span>{" "}
+                  needing attention today.
+                </>
+              ) : (
+                "You're all caught up."
+              )}
             </p>
           </div>
 
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full md:w-auto">
             <button
               onClick={onLogout}
-              className="bg-zinc-800 hover:bg-zinc-700 transition px-4 py-3 rounded-xl text-sm w-full sm:w-auto"
+              className="bg-zinc-900 ring-1 ring-zinc-800 hover:ring-zinc-700 hover:bg-zinc-800/60 transition px-4 py-3 rounded-xl text-sm w-full sm:w-auto"
             >
               Logout
             </button>
@@ -98,12 +144,9 @@ export default function Dashboard({
             <button
               onClick={onRefresh}
               disabled={syncing}
-              className="bg-blue-500 hover:bg-blue-600 disabled:opacity-50 transition px-5 py-3 rounded-xl flex items-center justify-center gap-2 font-medium w-full sm:w-auto"
+              className="bg-indigo-500 hover:bg-indigo-400 disabled:opacity-50 transition-all duration-200 px-5 py-3 rounded-xl flex items-center justify-center gap-2 font-medium w-full sm:w-auto shadow-lg shadow-indigo-500/25 hover:shadow-indigo-400/30"
             >
-              <RefreshCw
-                size={18}
-                className={syncing ? "animate-spin" : ""}
-              />
+              <RefreshCw size={18} className={syncing ? "animate-spin" : ""} />
               {syncing ? "Syncing…" : "Refresh Inbox"}
             </button>
           </div>
@@ -111,129 +154,178 @@ export default function Dashboard({
 
         {/* Sync status */}
         {syncStatus && syncStatus !== "complete" && (
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 mb-6 flex items-center gap-3">
-            <Clock3 className="text-yellow-400 shrink-0" size={18} />
+          <div className="bg-zinc-900/60 ring-1 ring-zinc-800 rounded-2xl p-4 mb-6 flex items-center gap-3">
+            <Clock3 className="text-amber-400 shrink-0" size={18} />
             <p className="text-sm text-zinc-300">
               {syncStatusLabel[syncStatus] ?? syncStatus.replace(/_/g, " ")}
             </p>
           </div>
         )}
 
-        {/* Summary stats */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5">
-            <p className="text-zinc-400 text-sm mb-2">Active Items</p>
-            <p className="text-3xl font-bold">{tasks.length}</p>
+        {/* High Priority */}
+        <section className="mb-8">
+          <div className="flex items-center gap-2.5 mb-4">
+            <div className="p-1.5 rounded-lg bg-red-400/10 shadow-[0_0_16px_-6px_rgba(248,113,113,0.5)]">
+              <AlertTriangle size={15} className="text-red-400" />
+            </div>
+            <h2 className="font-semibold text-lg tracking-[-0.01em]">High Priority</h2>
+            {highPriority.length > 0 && (
+              <span className="text-xs px-2 py-0.5 rounded-full bg-red-400/10 text-red-400 ring-1 ring-red-400/20">
+                {highPriority.length}
+              </span>
+            )}
           </div>
 
-          {(["follow_ups_needed", "renewals_deadlines", "financial_items"] as const).map(
-            (cat) => {
-              const cfg = getCategoryConfig(cat);
-              const Icon = cfg.icon;
-              return (
-                <div
-                  key={cat}
-                  className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5"
-                >
-                  <div className="flex items-center gap-2 mb-2">
-                    <Icon size={14} className={cfg.color} />
-                    <p className="text-zinc-400 text-sm">{cfg.label}</p>
-                  </div>
-                  <p className="text-3xl font-bold">
-                    {tasks.filter((t) => t.category === cat).length}
-                  </p>
-                </div>
-              );
-            }
-          )}
-        </div>
-
-        {/* Filter + sort bar */}
-        <div className="flex flex-col sm:flex-row sm:items-start gap-3 mb-6">
-          <div className="flex flex-wrap gap-2 flex-1">
-            {allCategories.map((cat) => {
-              const cfg = getCategoryConfig(cat);
-              const Icon = cfg.icon;
-              const hidden = hiddenCategories.has(cat);
-              const count = tasks.filter((t) => t.category === cat).length;
-              return (
-                <button
-                  key={cat}
-                  onClick={() => toggleCategory(cat)}
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition ${
-                    hidden
-                      ? "bg-zinc-900 border-zinc-700 text-zinc-500"
-                      : `${cfg.bg} ${cfg.border} ${cfg.color}`
-                  }`}
-                >
-                  <Icon size={11} />
-                  {cfg.label}
-                  <span
-                    className={`ml-0.5 ${hidden ? "text-zinc-600" : "opacity-70"}`}
-                  >
-                    {count}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-
-          <button
-            onClick={() => setSortByCount((v) => !v)}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-medium border transition shrink-0 ${
-              sortByCount
-                ? "bg-blue-500/20 border-blue-500/30 text-blue-400"
-                : "bg-zinc-900 border-zinc-700 text-zinc-400 hover:text-zinc-300"
-            }`}
-          >
-            <ArrowUpDown size={13} />
-            {sortByCount ? "Sorted by count" : "Sort by count"}
-          </button>
-        </div>
-
-        {/* Category sections grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {sortedCategories.map((cat) => {
-            const cfg = CATEGORY_CONFIG[cat] ?? getCategoryConfig(cat);
-            const Icon = cfg.icon;
-            const catTasks = tasks.filter((t) => t.category === cat);
-
-            return (
-              <div
-                key={cat}
-                className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5"
-              >
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <Icon size={17} className={cfg.color} />
-                    <h2 className="font-semibold">{cfg.label}</h2>
-                  </div>
-                  <span
-                    className={`text-xs px-2 py-0.5 rounded-full ${cfg.bg} ${cfg.color}`}
-                  >
-                    {catTasks.length}
-                  </span>
-                </div>
-
-                <div className="space-y-3">
-                  {catTasks.length === 0 ? (
-                    <p className="text-sm text-zinc-600 italic">No items</p>
-                  ) : (
-                    catTasks.map((task) => (
-                      <TaskCard
-                        key={task.id}
-                        task={task}
-                        onComplete={onComplete}
-                        onHide={onHide}
-                      />
-                    ))
-                  )}
-                </div>
+          {highPriority.length === 0 ? (
+            <EmptyState text="Nothing urgent right now." />
+          ) : (
+            <>
+              <div className="space-y-3">
+                {highPriorityItems.map((n) => (
+                  <NotificationCard
+                    key={n.id}
+                    notification={n}
+                    onOpen={setSelected}
+                    onDraftReply={(id) =>
+                      setSelected(notifications.find((x) => x.id === id) ?? null)
+                    }
+                    onSnooze={onSnooze}
+                    onDismiss={onDismiss}
+                  />
+                ))}
               </div>
-            );
-          })}
-        </div>
+              <Pagination
+                page={highPriorityPageSafe}
+                pageSize={PAGE_SIZE}
+                total={highPriority.length}
+                onChange={setHighPriorityPage}
+              />
+            </>
+          )}
+        </section>
+
+        {/* Upcoming */}
+        <section className="mb-8">
+          <div className="flex items-center gap-2.5 mb-4">
+            <div className="p-1.5 rounded-lg bg-cyan-400/10 shadow-[0_0_16px_-6px_rgba(34,211,238,0.5)]">
+              <CalendarClock size={15} className="text-cyan-400" />
+            </div>
+            <h2 className="font-semibold text-lg tracking-[-0.01em]">Upcoming</h2>
+            {upcoming.length > 0 && (
+              <span className="text-xs px-2 py-0.5 rounded-full bg-cyan-400/10 text-cyan-400 ring-1 ring-cyan-400/20">
+                {upcoming.length}
+              </span>
+            )}
+          </div>
+
+          {upcoming.length === 0 ? (
+            <EmptyState text="Nothing on the horizon." />
+          ) : (
+            <>
+              <div className="space-y-3">
+                {upcomingItems.map((n) => (
+                  <NotificationCard
+                    key={n.id}
+                    notification={n}
+                    onOpen={setSelected}
+                    onDraftReply={(id) =>
+                      setSelected(notifications.find((x) => x.id === id) ?? null)
+                    }
+                    onSnooze={onSnooze}
+                    onDismiss={onDismiss}
+                  />
+                ))}
+              </div>
+              <Pagination
+                page={upcomingPageSafe}
+                pageSize={PAGE_SIZE}
+                total={upcoming.length}
+                onChange={setUpcomingPage}
+              />
+            </>
+          )}
+        </section>
+
+        {/* AI Insights */}
+        <section className="mb-8">
+          <div className="flex items-center gap-2.5 mb-3">
+            <div className="p-1.5 rounded-lg bg-violet-400/10 shadow-[0_0_16px_-6px_rgba(167,139,250,0.5)]">
+              <Sparkles size={15} className="text-violet-400" />
+            </div>
+            <h2 className="font-semibold text-lg tracking-[-0.01em]">AI Insights</h2>
+          </div>
+
+          {insights.length === 0 ? (
+            <EmptyState text="No patterns worth flagging yet." />
+          ) : (
+            <>
+              <div className="bg-zinc-900/60 ring-1 ring-zinc-800 rounded-2xl px-5 divide-y divide-zinc-800/80">
+                {insightItems.map((insight) => (
+                  <InsightItem
+                    key={insight.id}
+                    insight={insight}
+                    onDismiss={onDismissInsight}
+                  />
+                ))}
+              </div>
+              <Pagination
+                page={insightsPageSafe}
+                pageSize={PAGE_SIZE}
+                total={insights.length}
+                onChange={setInsightsPage}
+              />
+            </>
+          )}
+        </section>
+
+        {/* Recent Notifications */}
+        {recent.length > 0 && (
+          <section>
+            <h2 className="font-medium text-xs uppercase tracking-wide text-zinc-500 mb-3">
+              Recent Notifications
+            </h2>
+            <div className="space-y-1.5">
+              {recent.map((n) => (
+                <button
+                  key={n.id}
+                  onClick={() => setSelected(n)}
+                  className="w-full text-left text-sm text-zinc-400 hover:text-zinc-200 transition truncate"
+                >
+                  {n.title}
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
       </div>
+
+      {selected && (
+        <NotificationModal
+          notification={selected}
+          onClose={() => setSelected(null)}
+          onComplete={(id) => {
+            onComplete(id);
+            setSelected(null);
+          }}
+          onSnooze={(id) => {
+            onSnooze(id);
+            setSelected(null);
+          }}
+          onDismiss={(id) => {
+            onDismiss(id);
+            setSelected(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function EmptyState({ text }: { text: string }) {
+  return (
+    <div className="flex items-center gap-2.5 text-sm text-zinc-600 py-1">
+      <CheckCircle2 size={15} className="text-zinc-700 shrink-0" />
+      {text}
     </div>
   );
 }

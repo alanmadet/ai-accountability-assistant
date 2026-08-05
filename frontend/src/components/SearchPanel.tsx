@@ -63,7 +63,7 @@ export default function SearchPanel() {
   return (
     <div className="p-4 md:p-8 pb-24 md:pb-8">
       <div className="max-w-3xl mx-auto">
-        <h2 className="text-2xl md:text-3xl font-bold mb-2">
+        <h2 className="text-2xl md:text-3xl font-bold mb-2 tracking-[-0.02em]">
           Inbox Search
         </h2>
 
@@ -74,10 +74,10 @@ export default function SearchPanel() {
         <div className="flex gap-2 mb-6">
           <button
             onClick={() => switchMode("search")}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition ${
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200 ${
               mode === "search"
-                ? "bg-blue-500 text-white"
-                : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+                ? "bg-indigo-500 text-white shadow-lg shadow-indigo-500/25"
+                : "bg-zinc-900 ring-1 ring-zinc-800 text-zinc-300 hover:ring-zinc-700"
             }`}
           >
             <Search size={16} />
@@ -86,10 +86,10 @@ export default function SearchPanel() {
 
           <button
             onClick={() => switchMode("ask")}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition ${
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200 ${
               mode === "ask"
-                ? "bg-purple-500 text-white"
-                : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+                ? "bg-violet-500 text-white shadow-lg shadow-violet-500/25"
+                : "bg-zinc-900 ring-1 ring-zinc-800 text-zinc-300 hover:ring-zinc-700"
             }`}
           >
             <Sparkles size={16} />
@@ -108,16 +108,16 @@ export default function SearchPanel() {
                 ? "Search emails semantically..."
                 : "Ask a question about your inbox..."
             }
-            className="flex-1 bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-500 transition"
+            className="flex-1 bg-zinc-900/60 ring-1 ring-zinc-800 rounded-xl px-4 py-3 text-white placeholder-zinc-500 focus:outline-none focus:ring-zinc-600 transition"
           />
 
           <button
             onClick={handleSubmit}
             disabled={loading || !query.trim()}
-            className={`px-5 py-3 rounded-xl font-medium transition disabled:opacity-50 flex items-center gap-2 shrink-0 ${
+            className={`px-5 py-3 rounded-xl font-medium transition-all duration-200 disabled:opacity-50 flex items-center gap-2 shrink-0 ${
               mode === "search"
-                ? "bg-blue-500 hover:bg-blue-600"
-                : "bg-purple-500 hover:bg-purple-600"
+                ? "bg-indigo-500 hover:bg-indigo-400 shadow-lg shadow-indigo-500/25"
+                : "bg-violet-500 hover:bg-violet-400 shadow-lg shadow-violet-500/25"
             }`}
           >
             {loading ? (
@@ -157,7 +157,7 @@ export default function SearchPanel() {
               searchResults.map((result) => (
                 <div
                   key={result.email_id}
-                  className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5"
+                  className="bg-zinc-900/60 ring-1 ring-zinc-800 hover:ring-zinc-700 transition rounded-2xl p-5"
                 >
                   <p className="font-semibold mb-1 break-words">
                     {result.subject || "(no subject)"}
@@ -180,11 +180,11 @@ export default function SearchPanel() {
           <div className="space-y-6">
             {askAnswer ? (
               <>
-                <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
+                <div className="bg-zinc-900/60 ring-1 ring-zinc-800 rounded-2xl p-6">
                   <div className="flex items-center gap-2 mb-4">
                     <Sparkles
                       size={18}
-                      className="text-purple-400 shrink-0"
+                      className="text-violet-400 shrink-0"
                     />
                     <h3 className="font-semibold">Answer</h3>
                   </div>
@@ -202,7 +202,7 @@ export default function SearchPanel() {
                       {askSources.map((source, i) => (
                         <div
                           key={i}
-                          className="bg-zinc-900 border border-zinc-800 rounded-xl p-4"
+                          className="bg-zinc-900/60 ring-1 ring-zinc-800 rounded-xl p-4"
                         >
                           <p className="text-sm font-medium break-words">
                             {source.subject || "(no subject)"}

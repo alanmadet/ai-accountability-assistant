@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from sqlalchemy import Column, String, Boolean, Text, Integer, ForeignKey, DateTime
 
 from pgvector.sqlalchemy import Vector
@@ -44,9 +46,45 @@ class ProcessedEmail(Base):
     user_email = Column(String, nullable=False)
 
     sender = Column(String)
+    sender_email = Column(String, nullable=True)
     subject = Column(String)
     snippet = Column(Text)
     body = Column(Text)
+    unsubscribe_url = Column(String, nullable=True)
+
+    thread_id = Column(String, nullable=True)
+    received_at = Column(DateTime, nullable=True)
+
+
+class Notification(Base):
+
+    __tablename__ = "notifications"
+
+    id = Column(String, primary_key=True)
+    user_email = Column(String, nullable=False)
+
+    title = Column(String)
+    summary = Column(Text)
+    reason = Column(Text)
+
+    kind = Column(String)
+    urgency = Column(String)
+    confidence = Column(Integer, nullable=True)
+    deadline = Column(DateTime, nullable=True)
+
+    recommended_actions = Column(Text)
+    ai_draft_reply = Column(Text, nullable=True)
+
+    source_email_id = Column(
+        String, ForeignKey("processed_emails.id"), nullable=True
+    )
+    sender = Column(String, nullable=True)
+    subject = Column(String, nullable=True)
+
+    status = Column(String, default="open")
+    snoozed_until = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 class EmailChunk(Base):
@@ -76,6 +114,9 @@ class Insight(Base):
     insight_type = Column(String)
     title = Column(String)
     description = Column(Text)
+    subject_key = Column(String, nullable=True)
+    is_dismissed = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 class UserSettings(Base):

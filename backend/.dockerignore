@@ -1,0 +1,8 @@
+.env
+.env.aws
+.env.*
+venv
+__pycache__
+*.pyc
+*.db
+.vscode

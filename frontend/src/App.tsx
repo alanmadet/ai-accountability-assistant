@@ -7,6 +7,9 @@ import {
   CheckCircle2,
   Settings,
   Search,
+  MessageCircleQuestion,
+  AlertTriangle,
+  Sparkles,
   Menu,
   X,
 } from "lucide-react";
@@ -15,7 +18,16 @@ import Dashboard from "./components/Dashboard";
 import SearchPanel from "./components/SearchPanel";
 import CompletedPage from "./components/CompletedPage";
 import SettingsPage from "./components/SettingsPage";
-import type { Task } from "./types/task";
+import PrivacyModal from "./components/PrivacyModal";
+import type { Notification, Insight } from "./types/notification";
+import {
+  fetchNotifications,
+  fetchInsights,
+  completeNotification,
+  dismissNotification,
+  snoozeNotification,
+  dismissInsight,
+} from "./services/api";
 
 const API_URL = import.meta.env.VITE_API_URL;
 
@@ -29,13 +41,15 @@ const NAV_ITEMS: { id: View; label: string; icon: typeof Mail }[] = [
 ];
 
 function App() {
-  const [tasks, setTasks] = useState<Task[]>([]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [insights, setInsights] = useState<Insight[]>([]);
   const [userName, setUserName] = useState("");
   const [syncing, setSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState("");
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [activeView, setActiveView] = useState<View>("dashboard");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [showPrivacy, setShowPrivacy] = useState(false);
 
   async function loadMe() {
     try {
@@ -47,11 +61,19 @@ function App() {
     }
   }
 
-  async function loadTasks() {
+  async function loadNotifications() {
     try {
-      const res = await fetch(`${API_URL}/tasks`, { credentials: "include" });
-      const data = await res.json();
-      setTasks(data.tasks ?? []);
+      const data = await fetchNotifications("open");
+      setNotifications(data);
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  async function loadInsights() {
+    try {
+      const data = await fetchInsights();
+      setInsights(data);
     } catch (err) {
       console.error(err);
     }
@@ -81,25 +103,37 @@ function App() {
     }
   }
 
-  async function handleCompleteTask(taskId: string) {
+  async function handleCompleteNotification(id: string) {
     try {
-      await fetch(`${API_URL}/tasks/${taskId}/complete`, {
-        method: "POST",
-        credentials: "include",
-      });
-      loadTasks();
+      await completeNotification(id);
+      loadNotifications();
     } catch (err) {
       console.error(err);
     }
   }
 
-  async function handleHideTask(taskId: string) {
+  async function handleDismissNotification(id: string) {
     try {
-      await fetch(`${API_URL}/tasks/${taskId}/hide`, {
-        method: "POST",
-        credentials: "include",
-      });
-      loadTasks();
+      await dismissNotification(id);
+      loadNotifications();
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  async function handleSnoozeNotification(id: string) {
+    try {
+      await snoozeNotification(id);
+      loadNotifications();
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  async function handleDismissInsight(id: string) {
+    try {
+      await dismissInsight(id);
+      loadInsights();
     } catch (err) {
       console.error(err);
     }
@@ -118,7 +152,8 @@ function App() {
           clearInterval(interval);
           setSyncing(false);
           setSyncStatus("");
-          loadTasks();
+          loadNotifications();
+          loadInsights();
         }
       } catch {
         clearInterval(interval);
@@ -152,7 +187,8 @@ function App() {
 
   useEffect(() => {
     if (isAuthenticated) {
-      loadTasks();
+      loadNotifications();
+      loadInsights();
       loadMe();
     }
   }, [isAuthenticated]);
@@ -162,7 +198,7 @@ function App() {
     return (
       <div className="min-h-screen bg-zinc-950 text-white flex items-center justify-center">
         <div className="flex items-center gap-3 text-zinc-400">
-          <RefreshCw className="animate-spin" size={20} />
+          <RefreshCw className="animate-spin text-indigo-400" size={20} />
           <span>Authenticating…</span>
         </div>
       </div>
@@ -172,25 +208,37 @@ function App() {
   // ── Landing page ──────────────────────────────────────────────────────────
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen bg-zinc-950 text-white px-4 md:px-6 py-10">
-        <div className="max-w-6xl mx-auto">
+      <div className="relative min-h-screen bg-zinc-950 text-white px-4 md:px-6 py-10 overflow-hidden">
+        <div
+          className="pointer-events-none absolute -top-40 -left-40 w-[32rem] h-[32rem] rounded-full bg-indigo-600/20 blur-3xl"
+          aria-hidden="true"
+        />
+        <div
+          className="pointer-events-none absolute top-20 right-0 w-[28rem] h-[28rem] rounded-full bg-violet-600/10 blur-3xl"
+          aria-hidden="true"
+        />
+
+        <div className="relative max-w-6xl mx-auto">
           <div className="mb-14">
             <div className="flex items-center gap-3 mb-6">
-              <Mail className="text-blue-400" size={32} />
-              <h1 className="text-4xl md:text-6xl font-bold leading-tight">
+              <div className="p-2 rounded-xl bg-indigo-400/10 shadow-[0_0_24px_-6px_rgba(129,140,248,0.6)]">
+                <Mail className="text-indigo-400" size={28} />
+              </div>
+              <h1 className="text-4xl md:text-6xl font-bold leading-tight tracking-[-0.03em]">
                 Beacon AI Assistant
               </h1>
             </div>
 
-            <h2 className="text-3xl md:text-5xl font-semibold leading-tight mb-6 max-w-5xl">
-              Your inbox already contains your obligations, follow-ups,
-              deadlines, and opportunities.
+            <h2 className="text-3xl md:text-5xl font-semibold leading-tight mb-6 max-w-5xl tracking-[-0.02em]">
+              An AI executive assistant for your inbox — not another
+              email organizer.
             </h2>
 
             <p className="text-zinc-400 text-lg md:text-xl leading-relaxed max-w-3xl">
-              Beacon uses AI to organize your inbox into actionable categories —
-              follow-ups, deadlines, financial items, travel, and more. It syncs
-              automatically so your dashboard stays current.
+              Beacon reads your inbox and tells you what actually deserves your
+              attention today — who's waiting on you, what's due, what changed —
+              with plain-language reasoning behind every item. Ask it anything
+              about your inbox, and it syncs automatically so it's always current.
             </p>
           </div>
 
@@ -198,30 +246,45 @@ function App() {
             {[
               {
                 color: "text-red-400",
-                title: "Follow-ups Needed",
-                desc: "Surface emails you need to reply to or act on.",
+                bg: "bg-red-400/10",
+                glow: "shadow-[0_0_20px_-6px_rgba(248,113,113,0.5)]",
+                icon: AlertTriangle,
+                title: "What Deserves Your Attention",
+                desc: "A daily briefing of high-priority items and upcoming deadlines — each with a plain-language reason, not just a category label.",
               },
               {
-                color: "text-yellow-400",
-                title: "Renewals & Deadlines",
-                desc: "Track expiring subscriptions, payments due, and approaching deadlines.",
+                color: "text-violet-400",
+                bg: "bg-violet-400/10",
+                glow: "shadow-[0_0_20px_-6px_rgba(167,139,250,0.5)]",
+                icon: Sparkles,
+                title: "AI Insights",
+                desc: "Relationship intelligence surfaced automatically: threads you haven't replied to, senders emailing you repeatedly, recurring bills that changed.",
               },
               {
-                color: "text-green-400",
-                title: "Financial Items",
-                desc: "Statements, payments, reimbursements, and account alerts.",
+                color: "text-indigo-400",
+                bg: "bg-indigo-400/10",
+                glow: "shadow-[0_0_20px_-6px_rgba(129,140,248,0.5)]",
+                icon: Search,
+                title: "Semantic Search",
+                desc: "Find anything in your inbox by meaning, not exact keywords — search the way you'd actually describe what you're looking for.",
               },
               {
-                color: "text-amber-400",
-                title: "Opportunities",
-                desc: "Deals, rewards, and limited-time offers worth reviewing.",
+                color: "text-cyan-400",
+                bg: "bg-cyan-400/10",
+                glow: "shadow-[0_0_20px_-6px_rgba(34,211,238,0.5)]",
+                icon: MessageCircleQuestion,
+                title: "Ask My Inbox",
+                desc: "Ask a natural-language question and get a direct answer, sourced from the emails that actually contain it.",
               },
             ].map((item) => (
               <div
                 key={item.title}
-                className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 md:p-6"
+                className="bg-zinc-900/60 ring-1 ring-zinc-800 hover:ring-zinc-700 transition-all duration-200 hover:-translate-y-0.5 rounded-2xl p-5 md:p-6"
               >
-                <h3 className={`font-semibold text-lg mb-2 ${item.color}`}>
+                <div className={`inline-flex p-2 rounded-xl mb-3 ${item.bg} ${item.glow}`}>
+                  <item.icon size={18} className={item.color} />
+                </div>
+                <h3 className="font-semibold text-lg mb-2 tracking-[-0.01em]">
                   {item.title}
                 </h3>
                 <p className="text-zinc-400 leading-relaxed">{item.desc}</p>
@@ -229,13 +292,24 @@ function App() {
             ))}
           </div>
 
-          <button
-            onClick={() => (window.location.href = `${API_URL}/auth/login`)}
-            className="w-full md:w-auto bg-blue-500 hover:bg-blue-600 transition px-8 py-4 rounded-2xl text-lg font-semibold"
-          >
-            Connect Gmail
-          </button>
+          <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+            <button
+              onClick={() => (window.location.href = `${API_URL}/auth/login`)}
+              className="w-full sm:w-auto bg-indigo-500 hover:bg-indigo-400 transition-all duration-200 px-8 py-4 rounded-2xl text-lg font-semibold shadow-lg shadow-indigo-500/25 hover:shadow-indigo-400/30"
+            >
+              Connect Gmail
+            </button>
+
+            <button
+              onClick={() => setShowPrivacy(true)}
+              className="text-sm text-zinc-500 hover:text-zinc-300 transition underline underline-offset-4 decoration-zinc-700"
+            >
+              Privacy &amp; Data Use
+            </button>
+          </div>
         </div>
+
+        {showPrivacy && <PrivacyModal onClose={() => setShowPrivacy(false)} />}
       </div>
     );
   }
@@ -244,13 +318,15 @@ function App() {
   return (
     <div className="min-h-screen bg-zinc-950 text-white flex overflow-x-hidden">
       {/* ── Desktop sidebar ── */}
-      <div className="hidden md:flex w-72 border-r border-zinc-800 bg-zinc-900/50 p-6 flex-col shrink-0">
+      <div className="hidden md:flex w-72 border-r border-zinc-800/80 bg-zinc-900/30 p-6 flex-col shrink-0">
         <div className="mb-10">
           <div className="flex items-center gap-3 mb-2">
-            <Mail className="text-blue-400" size={26} />
-            <h1 className="text-xl font-bold">Beacon AI</h1>
+            <div className="p-1.5 rounded-lg bg-indigo-400/10 shadow-[0_0_18px_-6px_rgba(129,140,248,0.6)]">
+              <Mail className="text-indigo-400" size={20} />
+            </div>
+            <h1 className="text-xl font-bold tracking-[-0.01em]">Beacon AI</h1>
           </div>
-          <p className="text-sm text-zinc-400">AI-powered inbox intelligence</p>
+          <p className="text-sm text-zinc-500">AI-powered inbox intelligence</p>
         </div>
 
         <nav className="space-y-1">
@@ -258,19 +334,22 @@ function App() {
             <button
               key={id}
               onClick={() => navigate(id)}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition text-left ${
+              className={`relative w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 text-left ${
                 activeView === id
-                  ? "bg-zinc-800 text-white"
-                  : "text-zinc-400 hover:bg-zinc-800 hover:text-white"
+                  ? "bg-zinc-800/80 text-white"
+                  : "text-zinc-400 hover:bg-zinc-800/50 hover:text-white"
               }`}
             >
-              <Icon size={18} />
+              {activeView === id && (
+                <span className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-0.5 rounded-full bg-indigo-400 shadow-[0_0_10px_1px_rgba(129,140,248,0.8)]" />
+              )}
+              <Icon size={18} className={activeView === id ? "text-indigo-400" : ""} />
               {label}
             </button>
           ))}
         </nav>
 
-        <div className="mt-auto pt-6 border-t border-zinc-800">
+        <div className="mt-auto pt-6 border-t border-zinc-800/80">
           <p className="text-xs text-zinc-500 mb-1">Logged in as</p>
           <p className="text-sm font-medium break-words">{userName}</p>
         </div>
@@ -292,8 +371,10 @@ function App() {
       >
         <div className="flex items-center justify-between mb-10">
           <div className="flex items-center gap-3">
-            <Mail className="text-blue-400" size={24} />
-            <span className="font-bold text-lg">Beacon AI</span>
+            <div className="p-1.5 rounded-lg bg-indigo-400/10 shadow-[0_0_18px_-6px_rgba(129,140,248,0.6)]">
+              <Mail className="text-indigo-400" size={20} />
+            </div>
+            <span className="font-bold text-lg tracking-[-0.01em]">Beacon AI</span>
           </div>
           <button
             onClick={() => setMobileNavOpen(false)}
@@ -308,13 +389,16 @@ function App() {
             <button
               key={id}
               onClick={() => navigate(id)}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition text-left ${
+              className={`relative w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 text-left ${
                 activeView === id
-                  ? "bg-zinc-800 text-white"
-                  : "text-zinc-400 hover:bg-zinc-800 hover:text-white"
+                  ? "bg-zinc-800/80 text-white"
+                  : "text-zinc-400 hover:bg-zinc-800/50 hover:text-white"
               }`}
             >
-              <Icon size={18} />
+              {activeView === id && (
+                <span className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-0.5 rounded-full bg-indigo-400 shadow-[0_0_10px_1px_rgba(129,140,248,0.8)]" />
+              )}
+              <Icon size={18} className={activeView === id ? "text-indigo-400" : ""} />
               {label}
             </button>
           ))}
@@ -346,7 +430,7 @@ function App() {
               <button
                 onClick={handleRefreshInbox}
                 disabled={syncing}
-                className="bg-blue-500 hover:bg-blue-600 disabled:opacity-50 transition px-3 py-1.5 rounded-xl flex items-center gap-1.5 text-sm"
+                className="bg-indigo-500 hover:bg-indigo-400 disabled:opacity-50 transition px-3 py-1.5 rounded-xl flex items-center gap-1.5 text-sm shadow-lg shadow-indigo-500/25"
               >
                 <RefreshCw
                   size={14}
@@ -364,13 +448,16 @@ function App() {
         <div className="flex-1 overflow-y-auto">
           {activeView === "dashboard" && (
             <Dashboard
-              tasks={tasks}
+              notifications={notifications}
+              insights={insights}
               syncing={syncing}
               syncStatus={syncStatus}
               userName={userName}
               onRefresh={handleRefreshInbox}
-              onComplete={handleCompleteTask}
-              onHide={handleHideTask}
+              onComplete={handleCompleteNotification}
+              onDismiss={handleDismissNotification}
+              onSnooze={handleSnoozeNotification}
+              onDismissInsight={handleDismissInsight}
               onLogout={handleLogout}
             />
           )}

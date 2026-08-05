@@ -68,8 +68,10 @@ export default function SettingsPage() {
     <div className="p-4 md:p-8 pb-24 md:pb-8">
       <div className="max-w-lg mx-auto">
         <div className="flex items-center gap-3 mb-2">
-          <Settings size={26} className="text-zinc-400 shrink-0" />
-          <h2 className="text-2xl md:text-3xl font-bold">Settings</h2>
+          <div className="p-2 rounded-xl bg-zinc-800/80 ring-1 ring-zinc-700/60">
+            <Settings size={20} className="text-zinc-400 shrink-0" />
+          </div>
+          <h2 className="text-2xl md:text-3xl font-bold tracking-[-0.02em]">Settings</h2>
         </div>
         <p className="text-zinc-400 mb-10">
           Configure how Beacon syncs your inbox automatically.
@@ -77,7 +79,7 @@ export default function SettingsPage() {
 
         <div className="space-y-8">
           {/* Auto-sync toggle */}
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
+          <div className="bg-zinc-900/60 ring-1 ring-zinc-800 rounded-2xl p-6">
             <div className="flex items-center justify-between">
               <div>
                 <p className="font-semibold mb-1">Auto-sync</p>
@@ -94,7 +96,7 @@ export default function SettingsPage() {
                   }))
                 }
                 className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${
-                  settings.auto_sync_enabled ? "bg-blue-500" : "bg-zinc-700"
+                  settings.auto_sync_enabled ? "bg-indigo-500" : "bg-zinc-700"
                 }`}
               >
                 <span
@@ -110,7 +112,7 @@ export default function SettingsPage() {
 
           {/* Sync frequency */}
           <div
-            className={`bg-zinc-900 border border-zinc-800 rounded-2xl p-6 transition-opacity ${
+            className={`bg-zinc-900/60 ring-1 ring-zinc-800 rounded-2xl p-6 transition-opacity ${
               !settings.auto_sync_enabled ? "opacity-40 pointer-events-none" : ""
             }`}
           >
@@ -126,10 +128,10 @@ export default function SettingsPage() {
                   onClick={() =>
                     setSettings((s) => ({ ...s, sync_frequency_hours: h }))
                   }
-                  className={`px-4 py-2 rounded-xl text-sm font-medium border transition ${
+                  className={`px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200 ${
                     settings.sync_frequency_hours === h
-                      ? "bg-blue-500 border-blue-500 text-white"
-                      : "bg-zinc-800 border-zinc-700 text-zinc-300 hover:border-zinc-500"
+                      ? "bg-indigo-500 text-white shadow-lg shadow-indigo-500/25"
+                      : "bg-zinc-800/70 ring-1 ring-zinc-700/60 text-zinc-300 hover:ring-zinc-600"
                   }`}
                 >
                   {h === 1 ? "Every hour" : `Every ${h}h`}
@@ -139,7 +141,7 @@ export default function SettingsPage() {
           </div>
 
           {/* Emails per sync */}
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
+          <div className="bg-zinc-900/60 ring-1 ring-zinc-800 rounded-2xl p-6">
             <p className="font-semibold mb-1">Emails per Sync</p>
             <p className="text-sm text-zinc-400 mb-4">
               Maximum emails to fetch and process per sync.
@@ -152,10 +154,10 @@ export default function SettingsPage() {
                   onClick={() =>
                     setSettings((s) => ({ ...s, sync_email_count: n }))
                   }
-                  className={`px-4 py-2 rounded-xl text-sm font-medium border transition ${
+                  className={`px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200 ${
                     settings.sync_email_count === n
-                      ? "bg-blue-500 border-blue-500 text-white"
-                      : "bg-zinc-800 border-zinc-700 text-zinc-300 hover:border-zinc-500"
+                      ? "bg-indigo-500 text-white shadow-lg shadow-indigo-500/25"
+                      : "bg-zinc-800/70 ring-1 ring-zinc-700/60 text-zinc-300 hover:ring-zinc-600"
                   }`}
                 >
                   {n} emails
@@ -168,7 +170,11 @@ export default function SettingsPage() {
           <button
             onClick={handleSave}
             disabled={saving}
-            className="w-full flex items-center justify-center gap-2 bg-blue-500 hover:bg-blue-600 disabled:opacity-50 transition px-5 py-3 rounded-xl font-medium"
+            className={`w-full flex items-center justify-center gap-2 disabled:opacity-50 transition-all duration-200 px-5 py-3 rounded-xl font-medium shadow-lg ${
+              saved
+                ? "bg-emerald-500 shadow-emerald-500/25"
+                : "bg-indigo-500 hover:bg-indigo-400 shadow-indigo-500/25 hover:shadow-indigo-400/30"
+            }`}
           >
             {saving ? (
               <Loader2 size={18} className="animate-spin" />
