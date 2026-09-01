@@ -171,9 +171,9 @@ export default function SearchPanel() {
                   <p className="text-sm text-zinc-300 leading-relaxed break-words">
                     {result.chunk_preview}
                   </p>
-                  {gmailUrl(result.gmail_message_id, result.rfc822_message_id) && (
+                  {gmailUrl(result.email_id, result.gmail_message_id, result.rfc822_message_id) && (
                     <a
-                      href={gmailUrl(result.gmail_message_id, result.rfc822_message_id) ?? undefined}
+                      href={gmailUrl(result.email_id, result.gmail_message_id, result.rfc822_message_id) ?? undefined}
                       target="_blank"
                       rel="noreferrer"
                       className="inline-block text-xs text-indigo-400 hover:text-indigo-300 mt-3"

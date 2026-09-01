@@ -33,6 +33,7 @@ from sqlalchemy import text, func, or_
 from database import SessionLocal, engine, Base
 from migrations import run_migrations
 from retrieval import reciprocal_rank_fusion, search_terms
+from gmail_links import gmail_web_url
 
 from models import (
     Task, SyncJob, ProcessedEmail, EmailChunk, UserSettings,
@@ -1291,6 +1292,29 @@ def get_email(email_id: str, request: Request):
         "unsubscribe_url": email.unsubscribe_url,
         "rfc822_message_id": email.rfc822_message_id,
     }
+
+
+@app.get("/emails/{email_id}/open")
+def open_email_in_gmail(email_id: str, request: Request):
+    user_email = require_user(request)
+    db = SessionLocal()
+    email = db.query(ProcessedEmail).filter(
+        ProcessedEmail.id == email_id,
+        ProcessedEmail.user_email == user_email,
+    ).first()
+    if not email:
+        db.close()
+        raise HTTPException(status_code=404, detail="Email not found")
+    target = gmail_web_url(
+        user_email,
+        email.thread_id,
+        email.gmail_message_id,
+        email.rfc822_message_id,
+    )
+    db.close()
+    if not target:
+        raise HTTPException(status_code=404, detail="Gmail link is unavailable")
+    return RedirectResponse(target, status_code=302)
 
 
 @app.get("/insights")
