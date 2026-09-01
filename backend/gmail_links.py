@@ -12,8 +12,11 @@ def gmail_web_url(
     Beacon redirects to this URL from its own API so mobile browsers retain
     web navigation instead of handing a fragment-only target to the Gmail app.
     """
-    account = quote(user_email, safe="")
-    base = f"https://mail.google.com/mail/u/?authuser={account}"
+    # Do not use ?authuser=<email> here. Gmail performs an account-selection
+    # redirect before the fragment reaches its client router, which drops the
+    # thread target and lands on #inbox. /u/0/ preserves and canonicalizes the
+    # Gmail API thread ID on desktop and mobile web.
+    base = "https://mail.google.com/mail/u/0/"
     if thread_id:
         return f"{base}#all/{quote(thread_id, safe='')}"
     if gmail_message_id:
