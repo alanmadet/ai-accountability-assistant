@@ -27,6 +27,7 @@ import {
   dismissNotification,
   snoozeNotification,
   dismissInsight,
+  bulkCompleteNotifications,
 } from "./services/api";
 
 const API_URL = import.meta.env.VITE_API_URL;
@@ -109,6 +110,17 @@ function App() {
       loadNotifications();
     } catch (err) {
       console.error(err);
+    }
+  }
+
+  async function handleCompleteAll(ids: string[]) {
+    const previous = notifications;
+    setNotifications((current) => current.filter((item) => !ids.includes(item.id)));
+    try {
+      await bulkCompleteNotifications(ids);
+    } catch (err) {
+      setNotifications(previous);
+      throw err;
     }
   }
 
@@ -455,6 +467,7 @@ function App() {
               userName={userName}
               onRefresh={handleRefreshInbox}
               onComplete={handleCompleteNotification}
+              onCompleteAll={handleCompleteAll}
               onDismiss={handleDismissNotification}
               onSnooze={handleSnoozeNotification}
               onDismissInsight={handleDismissInsight}

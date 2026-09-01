@@ -26,6 +26,7 @@ interface Props {
   userName: string;
   onRefresh: () => void;
   onComplete: (id: string) => void;
+  onCompleteAll: (ids: string[]) => Promise<void>;
   onDismiss: (id: string) => void;
   onSnooze: (id: string) => void;
   onDismissInsight: (id: string) => void;
@@ -40,6 +41,7 @@ export default function Dashboard({
   userName,
   onRefresh,
   onComplete,
+  onCompleteAll,
   onDismiss,
   onSnooze,
   onDismissInsight,
@@ -109,6 +111,17 @@ export default function Dashboard({
           </div>
 
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full md:w-auto">
+            {notifications.length > 0 && (
+              <button
+                onClick={async () => {
+                  if (notifications.length > 5 && !window.confirm(`Mark all ${notifications.length} visible items as complete?`)) return;
+                  await onCompleteAll(notifications.map((item) => item.id));
+                }}
+                className="bg-zinc-900 ring-1 ring-zinc-800 hover:ring-zinc-700 transition px-4 py-3 rounded-xl text-sm w-full sm:w-auto"
+              >
+                Mark all complete
+              </button>
+            )}
             <button
               onClick={onLogout}
               className="bg-zinc-900 ring-1 ring-zinc-800 hover:ring-zinc-700 hover:bg-zinc-800/60 transition px-4 py-3 rounded-xl text-sm w-full sm:w-auto"

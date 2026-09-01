@@ -15,6 +15,8 @@ export interface SearchResult {
   sender: string;
   snippet: string;
   chunk_preview: string;
+  gmail_message_id: string | null;
+  rfc822_message_id: string | null;
 }
 
 export interface AskSource {
@@ -26,4 +28,5 @@ export interface UserSettings {
   auto_sync_enabled: boolean;
   sync_frequency_hours: number;
   sync_email_count: number;
+  gmail_connected?: boolean;
 }

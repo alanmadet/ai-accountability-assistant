@@ -195,6 +195,11 @@ def generate_insights(candidates: list) -> list:
                 - insight_type: one of "relationship", "high_volume",
                   "waiting_on"
                 - subject_key: the candidate's subject_key value, unchanged
+                - confidence: integer 0-100 based only on evidence strength
+                - actionability: number 0-1
+                - urgency: number 0-1
+                - novelty: number 0-1; repeated volume alone should be low
+                - evidence_email_ids: copy the candidate's email_ids unchanged
 
                 Return ONLY valid JSON of the form:
                 {"insights": [ {...}, ... ]}

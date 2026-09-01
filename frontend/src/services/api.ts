@@ -135,3 +135,28 @@ export async function fetchTasks() {
       credentials: "include",
     });
   }
+
+  export async function bulkCompleteNotifications(ids: string[]) {
+    const response = await fetch(`${API_URL}/notifications/bulk`, {
+      method: "PATCH",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids, status: "completed" }),
+    });
+    if (!response.ok) throw new Error("Failed to complete notifications");
+    return response.json();
+  }
+
+  export async function sendInsightFeedback(
+    id: string,
+    useful: boolean,
+    reason?: string
+  ) {
+    const response = await fetch(`${API_URL}/insights/${id}/feedback`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ useful, reason }),
+    });
+    if (!response.ok) throw new Error("Failed to save feedback");
+  }

@@ -51,6 +51,15 @@ export default function SettingsPage() {
     }
   }
 
+  async function disconnectGmail() {
+    if (!window.confirm("Disconnect Gmail? Beacon will stop syncing and remove its stored Google credentials.")) return;
+    const response = await fetch(`${API_URL}/auth/disconnect`, {
+      method: "POST",
+      credentials: "include",
+    });
+    if (response.ok) window.location.href = "/";
+  }
+
   useEffect(() => {
     loadSettings();
   }, []);
@@ -184,6 +193,13 @@ export default function SettingsPage() {
               <RefreshCw size={18} />
             )}
             {saving ? "Saving…" : saved ? "Saved!" : "Save Settings"}
+          </button>
+
+          <button
+            onClick={disconnectGmail}
+            className="w-full px-5 py-3 rounded-xl font-medium text-red-300 ring-1 ring-red-500/30 hover:bg-red-500/10 transition"
+          >
+            Disconnect Gmail
           </button>
         </div>
       </div>

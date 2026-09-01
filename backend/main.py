@@ -1,9 +1,9 @@
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, HTMLResponse
 
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -17,20 +17,27 @@ import os
 import base64
 import json
 import re
+import hashlib
+import logging
+import requests as http_requests
+from html import unescape
+from html.parser import HTMLParser
+from urllib.parse import urlparse, parse_qs
 
 from collections import defaultdict
 from email.utils import parseaddr
 
-os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
-
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import text, func, or_
 
 from database import SessionLocal, engine, Base
+from migrations import run_migrations
+from retrieval import reciprocal_rank_fusion, search_terms
 
 from models import (
     Task, SyncJob, ProcessedEmail, EmailChunk, UserSettings,
-    Notification, Insight,
+    Notification, Insight, AllowedUser, InsightFeedback, IndexingStatus,
+    OAuthState,
 )
 
 from ai_service import (
@@ -46,14 +53,39 @@ from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request as GoogleRequest
 
-load_dotenv(".env.aws", override=True)
-load_dotenv()
+# Local development reads .env. AWS/ECS should inject environment variables
+# through the task definition/Secrets Manager. A different file is only read
+# when explicitly selected, preventing local runs from touching RDS by accident.
+load_dotenv(os.getenv("BEACON_ENV_FILE", ".env"), override=False)
 
 FRONTEND_URL = os.getenv("FRONTEND_URL")
 BACKEND_URL = os.getenv("BACKEND_URL")
 SESSION_SECRET = os.getenv("SESSION_SECRET")
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
+BEACON_ADMIN_EMAIL = (os.getenv("BEACON_ADMIN_EMAIL") or "").strip().casefold()
+TOKEN_ENCRYPTION_KEY = os.getenv("TOKEN_ENCRYPTION_KEY")
+APP_ENV = os.getenv("APP_ENV", "development").lower()
+SYNC_WINDOW_DAYS = int(os.getenv("GMAIL_SYNC_WINDOW_DAYS", "90"))
+
+logger = logging.getLogger("beacon")
+
+if APP_ENV == "production":
+    missing = [name for name, value in {
+        "DATABASE_URL": os.getenv("DATABASE_URL"),
+        "FRONTEND_URL": FRONTEND_URL,
+        "BACKEND_URL": BACKEND_URL,
+        "SESSION_SECRET": SESSION_SECRET,
+        "GOOGLE_CLIENT_ID": GOOGLE_CLIENT_ID,
+        "GOOGLE_CLIENT_SECRET": GOOGLE_CLIENT_SECRET,
+        "BEACON_ADMIN_EMAIL": BEACON_ADMIN_EMAIL,
+        "TOKEN_ENCRYPTION_KEY": TOKEN_ENCRYPTION_KEY,
+    }.items() if not value]
+    if missing:
+        raise RuntimeError(f"Missing required production environment: {', '.join(missing)}")
+
+if APP_ENV != "production":
+    os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
 
 oauth = OAuth()
 
@@ -80,36 +112,18 @@ with engine.connect() as conn:
         print(f"pgvector not available, skipping: {e}")
         conn.rollback()
 
-try:
-    Base.metadata.create_all(bind=engine)
-except Exception as e:
-    print(f"create_all failed (pgvector likely missing): {e}")
-    for table in Base.metadata.sorted_tables:
-        if table.name == "email_chunks":
-            continue
-        try:
-            table.create(bind=engine, checkfirst=True)
-        except Exception as te:
-            print(f"Failed to create table {table.name}: {te}")
+Base.metadata.create_all(bind=engine)
+run_migrations(engine)
 
-with engine.connect() as conn:
-    for stmt in [
-        "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP",
-        "ALTER TABLE processed_emails ADD COLUMN IF NOT EXISTS sender_email VARCHAR",
-        "ALTER TABLE processed_emails ADD COLUMN IF NOT EXISTS thread_id VARCHAR",
-        "ALTER TABLE processed_emails ADD COLUMN IF NOT EXISTS received_at TIMESTAMP",
-        "ALTER TABLE processed_emails ADD COLUMN IF NOT EXISTS unsubscribe_url VARCHAR",
-        "ALTER TABLE processed_emails ADD COLUMN IF NOT EXISTS rfc822_message_id VARCHAR",
-        "ALTER TABLE insights ADD COLUMN IF NOT EXISTS subject_key VARCHAR",
-        "ALTER TABLE insights ADD COLUMN IF NOT EXISTS is_dismissed BOOLEAN DEFAULT FALSE",
-        "ALTER TABLE insights ADD COLUMN IF NOT EXISTS created_at TIMESTAMP",
-    ]:
-        try:
-            conn.execute(text(stmt))
-            conn.commit()
-        except Exception as e:
-            print(f"Migration statement failed ({stmt}): {e}")
-            conn.rollback()
+if BEACON_ADMIN_EMAIL:
+    with SessionLocal() as db:
+        admin = db.query(AllowedUser).filter(AllowedUser.email == BEACON_ADMIN_EMAIL).first()
+        if not admin:
+            db.add(AllowedUser(
+                id=str(uuid.uuid4()), email=BEACON_ADMIN_EMAIL,
+                invited_by="BEACON_ADMIN_EMAIL", status="active",
+            ))
+            db.commit()
 
 scheduler = BackgroundScheduler()
 
@@ -126,7 +140,148 @@ class SettingsRequest(BaseModel):
     sync_email_count: int
 
 
+class AllowedUserRequest(BaseModel):
+    email: str
+
+
+class BulkNotificationRequest(BaseModel):
+    ids: list[str]
+    status: str
+
+
+class FeedbackRequest(BaseModel):
+    useful: bool
+    reason: str | None = None
+
+
 # ── Helpers ──────────────────────────────────────────────────────────────────
+
+def normalize_email(value: str) -> str:
+    return (value or "").strip().casefold()
+
+
+def require_user(request: Request) -> str:
+    user_email = normalize_email(request.session.get("user_email", ""))
+    if not user_email:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    with SessionLocal() as db:
+        allowed = db.query(AllowedUser).filter(
+            AllowedUser.email == user_email,
+            AllowedUser.status.in_(["invited", "active"]),
+        ).first()
+    if not allowed:
+        request.session.clear()
+        raise HTTPException(status_code=403, detail="Beacon access has been revoked")
+    return user_email
+
+
+def require_admin(request: Request) -> str:
+    user_email = require_user(request)
+    if not BEACON_ADMIN_EMAIL or user_email != BEACON_ADMIN_EMAIL:
+        raise HTTPException(status_code=403, detail="Administrator access required")
+    return user_email
+
+
+def _fernet():
+    if not TOKEN_ENCRYPTION_KEY:
+        if APP_ENV == "production":
+            raise RuntimeError("TOKEN_ENCRYPTION_KEY is required in production")
+        return None
+    from cryptography.fernet import Fernet
+    return Fernet(TOKEN_ENCRYPTION_KEY.encode())
+
+
+def encrypt_token(value: str | None) -> str | None:
+    if not value:
+        return None
+    if value.startswith("fernet:"):
+        return value
+    cipher = _fernet()
+    return "fernet:" + cipher.encrypt(value.encode()).decode() if cipher else value
+
+
+def decrypt_token(value: str | None) -> str | None:
+    if not value or not value.startswith("fernet:"):
+        return value
+    return _fernet().decrypt(value.removeprefix("fernet:").encode()).decode()
+
+
+def credentials_for(settings: UserSettings) -> Credentials:
+    creds = Credentials(
+        token=decrypt_token(settings.google_access_token),
+        refresh_token=decrypt_token(settings.google_refresh_token),
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=GOOGLE_CLIENT_ID,
+        client_secret=GOOGLE_CLIENT_SECRET,
+    )
+    if not creds.token or (settings.google_token_expires_at and settings.google_token_expires_at <= datetime.utcnow()):
+        if not creds.refresh_token:
+            raise RuntimeError("Gmail is disconnected; reconnect it in Settings")
+        creds.refresh(GoogleRequest())
+        settings.google_access_token = encrypt_token(creds.token)
+        settings.google_token_expires_at = creds.expiry
+    # Lazy, non-disruptive migration of legacy plaintext credentials.
+    settings.google_refresh_token = encrypt_token(settings.google_refresh_token)
+    settings.google_access_token = encrypt_token(settings.google_access_token)
+    return creds
+
+
+class _HTMLTextExtractor(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.parts = []
+    def handle_data(self, data):
+        self.parts.append(data)
+
+
+def html_to_text(value: str) -> str:
+    parser = _HTMLTextExtractor()
+    parser.feed(value)
+    return unescape(" ".join(parser.parts)).strip()
+
+
+def _oauth_state_hash(state: str) -> str:
+    return hashlib.sha256(state.encode("utf-8")).hexdigest()
+
+
+def persist_oauth_state(request: Request, location: str) -> None:
+    state = parse_qs(urlparse(location).query).get("state", [None])[0]
+    if not state:
+        raise RuntimeError("Google authorization redirect did not include state")
+    session_key = f"_state_google_{state}"
+    state_data = request.session.get(session_key)
+    if not state_data:
+        raise RuntimeError("Google authorization state was not saved in the session")
+    db = SessionLocal()
+    db.query(OAuthState).filter(OAuthState.expires_at <= datetime.utcnow()).delete(
+        synchronize_session=False
+    )
+    db.add(OAuthState(
+        id=str(uuid.uuid4()),
+        state_hash=_oauth_state_hash(state),
+        state_data=json.dumps(state_data),
+        expires_at=datetime.utcnow() + timedelta(minutes=10),
+    ))
+    db.commit()
+    db.close()
+
+
+def restore_oauth_state(request: Request, state: str) -> None:
+    session_key = f"_state_google_{state}"
+    if request.session.get(session_key):
+        return
+    db = SessionLocal()
+    record = db.query(OAuthState).filter(
+        OAuthState.state_hash == _oauth_state_hash(state),
+        OAuthState.expires_at > datetime.utcnow(),
+    ).first()
+    if not record:
+        db.close()
+        return
+    request.session[session_key] = json.loads(record.state_data)
+    db.delete(record)
+    db.commit()
+    db.close()
 
 def update_job_status(job_id: str, status: str):
     db: Session = SessionLocal()
@@ -140,20 +295,13 @@ def update_job_status(job_id: str, status: str):
 def extract_email_body(payload: dict) -> str:
     mime_type = payload.get("mimeType", "")
 
-    if mime_type == "text/plain":
+    if mime_type in {"text/plain", "text/html"}:
         data = payload.get("body", {}).get("data", "")
         if data:
-            return base64.urlsafe_b64decode(
+            decoded = base64.urlsafe_b64decode(
                 data + "=="
             ).decode("utf-8", errors="ignore")
-
-    for part in payload.get("parts", []):
-        if part.get("mimeType") == "text/plain":
-            data = part.get("body", {}).get("data", "")
-            if data:
-                return base64.urlsafe_b64decode(
-                    data + "=="
-                ).decode("utf-8", errors="ignore")
+            return html_to_text(decoded) if mime_type == "text/html" else decoded
 
     for part in payload.get("parts", []):
         body = extract_email_body(part)
@@ -186,22 +334,25 @@ def fetch_recent_emails(token, max_results: int = 100):
     credentials = Credentials(token=token["access_token"])
     gmail = build("gmail", "v1", credentials=credentials)
 
-    results = gmail.users().messages().list(
-        userId="me",
-        maxResults=max_results,
-        q="newer_than:30d"
-    ).execute()
-
-    messages = results.get("messages", [])
-    print(f"TOTAL GMAIL MESSAGES: {len(messages)}")
+    messages = []
+    page_token = None
+    while len(messages) < max_results:
+        page_size = min(500, max_results - len(messages))
+        results = gmail.users().messages().list(
+            userId="me", maxResults=page_size,
+            q=f"newer_than:{SYNC_WINDOW_DAYS}d", pageToken=page_token,
+        ).execute()
+        messages.extend(results.get("messages", []))
+        page_token = results.get("nextPageToken")
+        if not page_token:
+            break
+    logger.info("gmail_sync_listed", extra={"count": len(messages)})
 
     emails = []
 
     for message in messages:
-        print(f"PROCESSING MESSAGE {message['id']}")
-
         msg = gmail.users().messages().get(
-            userId="me", id=message["id"]
+            userId="me", id=message["id"], format="full"
         ).execute()
 
         headers = msg["payload"].get("headers", [])
@@ -303,7 +454,8 @@ def build_insight_candidates(db: Session, user_email: str, window_days: int = 30
                 "sender": display_name,
                 "days_since_contact": days_since,
                 "message_count": len(msgs),
-                "signal": "no_reply"
+                "signal": "no_reply",
+                "email_ids": [message.id for message in msgs[-5:]],
             })
 
         if len(msgs) >= 3:
@@ -313,7 +465,8 @@ def build_insight_candidates(db: Session, user_email: str, window_days: int = 30
                 "sender": display_name,
                 "days_since_contact": days_since,
                 "message_count": len(msgs),
-                "signal": "high_volume"
+                "signal": "high_volume",
+                "email_ids": [message.id for message in msgs[-5:]],
             })
 
     return candidates
@@ -325,7 +478,15 @@ def save_insights(db: Session, user_email: str, insight_dicts: list):
         insight_type = ins.get("insight_type", "relationship")
         title = ins.get("title")
 
-        if not subject_key or not title:
+        confidence = max(0, min(100, int(ins.get("confidence", 70))))
+        score = (
+            float(ins.get("actionability", 0.5))
+            * float(ins.get("urgency", 0.5))
+            * (confidence / 100)
+            * float(ins.get("novelty", 0.7))
+        )
+        threshold = float(os.getenv("INSIGHT_SCORE_THRESHOLD", "0.08"))
+        if not subject_key or not title or score < threshold:
             continue
 
         existing = db.query(Insight).filter(
@@ -339,6 +500,10 @@ def save_insights(db: Session, user_email: str, insight_dicts: list):
             existing.title = title
             existing.description = ins.get("description", "")
             existing.created_at = datetime.utcnow()
+            existing.updated_at = datetime.utcnow()
+            existing.confidence = confidence
+            existing.score = score
+            existing.evidence_email_ids = json.dumps(ins.get("evidence_email_ids", []))
         else:
             db.add(Insight(
                 id=str(uuid.uuid4()),
@@ -348,7 +513,12 @@ def save_insights(db: Session, user_email: str, insight_dicts: list):
                 description=ins.get("description", ""),
                 subject_key=subject_key,
                 is_dismissed=False,
-                created_at=datetime.utcnow()
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow(),
+                status="active",
+                confidence=confidence,
+                score=score,
+                evidence_email_ids=json.dumps(ins.get("evidence_email_ids", [])),
             ))
 
 
@@ -359,13 +529,25 @@ def process_sync(
     email_count: int = 100
 ):
     update_job_status(job_id, "fetching_emails")
-    emails = fetch_recent_emails(token, max_results=email_count)
+    try:
+        emails = fetch_recent_emails(token, max_results=email_count)
+    except Exception as exc:
+        db = SessionLocal()
+        db.query(SyncJob).filter(SyncJob.id == job_id).update({
+            "status": "failed", "error": str(exc), "completed_at": datetime.utcnow()
+        })
+        db.commit()
+        db.close()
+        logger.exception("Gmail fetch failed for sync job %s", job_id)
+        return
 
     update_job_status(job_id, "filtering_threads")
     update_job_status(job_id, "extracting_tasks")
 
     db: Session = SessionLocal()
     today = datetime.utcnow().strftime("%Y-%m-%d")
+    stats = {"emails_synced": len(emails), "emails_parsed": 0,
+             "emails_embedded": 0, "embedding_failures": 0, "indexed_chunks": 0}
 
     for email_data in emails:
         existing_email = db.query(ProcessedEmail).filter(
@@ -374,7 +556,8 @@ def process_sync(
         ).first()
 
         if existing_email:
-            print("SKIPPING ALREADY PROCESSED EMAIL")
+            # Gmail message resources are immutable; already-indexed messages
+            # do not need repeated LLM or embedding calls.
             continue
 
         notifications = analyze_email(email_data["content"], today)
@@ -397,6 +580,7 @@ def process_sync(
         )
         db.add(processed_email)
         db.flush()
+        stats["emails_parsed"] += 1
 
         for note in notifications:
             title = note.get("title")
@@ -439,7 +623,8 @@ def process_sync(
             )
             db.add(notification)
 
-        chunks = chunk_text(email_data["body"])
+        chunks = chunk_text(email_data["body"] or email_data["snippet"])
+        embedded = False
 
         for i, chunk in enumerate(chunks):
             chunk_content = (
@@ -447,7 +632,12 @@ def process_sync(
                 f"From: {email_data['sender']}\n\n"
                 f"{chunk}"
             )
-            embedding = embed_text(chunk_content)
+            try:
+                embedding = embed_text(chunk_content)
+            except Exception:
+                stats["embedding_failures"] += 1
+                logger.exception("Embedding failed for Gmail message %s", email_data["gmail_message_id"])
+                continue
 
             email_chunk = EmailChunk(
                 id=str(uuid.uuid4()),
@@ -458,6 +648,15 @@ def process_sync(
                 embedding=embedding
             )
             db.add(email_chunk)
+            stats["indexed_chunks"] += 1
+            embedded = True
+
+        processed_email.content_hash = hashlib.sha256(
+            (email_data["body"] or email_data["snippet"]).encode("utf-8")
+        ).hexdigest()
+        if embedded:
+            processed_email.embedded_at = datetime.utcnow()
+            stats["emails_embedded"] += 1
 
     db.commit()
 
@@ -472,9 +671,20 @@ def process_sync(
         print(f"INSIGHT GENERATION FAILED: {e}")
         db.rollback()
 
+    job = db.query(SyncJob).filter(SyncJob.id == job_id).first()
+    for key, value in stats.items():
+        setattr(job, key, value)
+    job.status = "complete"
+    job.completed_at = datetime.utcnow()
+    indexing = db.query(IndexingStatus).filter(IndexingStatus.user_email == user_email).first()
+    if not indexing:
+        indexing = IndexingStatus(user_email=user_email)
+        db.add(indexing)
+    for key, value in stats.items():
+        setattr(indexing, key, value)
+    indexing.last_successful_indexing_at = datetime.utcnow()
+    db.commit()
     db.close()
-
-    update_job_status(job_id, "complete")
 
 
 def run_auto_sync():
@@ -482,9 +692,13 @@ def run_auto_sync():
     try:
         now = datetime.utcnow()
 
-        enabled_users = db.query(UserSettings).filter(
+        enabled_users = db.query(UserSettings).join(
+            AllowedUser, AllowedUser.email == UserSettings.user_email
+        ).filter(
             UserSettings.auto_sync_enabled == True,
-            UserSettings.google_refresh_token.isnot(None)
+            UserSettings.google_refresh_token.isnot(None),
+            UserSettings.gmail_connected == True,
+            AllowedUser.status.in_(["invited", "active"]),
         ).all()
 
         for user_settings in enabled_users:
@@ -496,19 +710,12 @@ def run_auto_sync():
                     continue
 
             try:
-                creds = Credentials(
-                    token=None,
-                    refresh_token=user_settings.google_refresh_token,
-                    token_uri="https://oauth2.googleapis.com/token",
-                    client_id=GOOGLE_CLIENT_ID,
-                    client_secret=GOOGLE_CLIENT_SECRET
-                )
-                creds.refresh(GoogleRequest())
+                creds = credentials_for(user_settings)
 
                 token = {"access_token": creds.token}
 
                 job_id = str(uuid.uuid4())
-                job = SyncJob(id=job_id, status="queued")
+                job = SyncJob(id=job_id, status="queued", user_email=user_settings.user_email)
                 db.add(job)
 
                 user_settings.last_auto_synced_at = now
@@ -551,16 +758,18 @@ app = FastAPI(lifespan=lifespan)
 app.add_middleware(
     SessionMiddleware,
     secret_key=SESSION_SECRET,
-    same_site="none",
-    https_only=True,
+    same_site="none" if APP_ENV == "production" else "lax",
+    https_only=APP_ENV == "production",
     max_age=30 * 24 * 60 * 60
 )
 
-_allowed_origins = list({
+_allowed_origins = [origin for origin in {
     FRONTEND_URL,
+    "http://localhost:5173" if APP_ENV != "production" else None,
+    "http://127.0.0.1:5173" if APP_ENV != "production" else None,
     "https://beacon-ai-assistant.com",
     "https://www.beacon-ai-assistant.com",
-})
+} if origin]
 
 app.add_middleware(
     CORSMiddleware,
@@ -581,58 +790,114 @@ def root():
 @app.get("/auth/login")
 async def login(request: Request):
     redirect_uri = f"{BACKEND_URL}/auth/callback"
-    return await oauth.google.authorize_redirect(
+    response = await oauth.google.authorize_redirect(
         request,
         redirect_uri,
         access_type="offline",
-        prompt="consent"
+        prompt="consent select_account",
+        include_granted_scopes="true",
     )
+    persist_oauth_state(request, response.headers["location"])
+    return response
 
 
 @app.get("/auth/callback")
 async def auth_callback(request: Request):
     try:
+        callback_state = request.query_params.get("state")
+        if callback_state:
+            restore_oauth_state(request, callback_state)
         token = await oauth.google.authorize_access_token(request)
         userinfo = token.get("userinfo")
-        user_email = userinfo["email"]
+        if not userinfo or not userinfo.get("email_verified"):
+            raise HTTPException(status_code=403, detail="Google email is not verified")
+        user_email = normalize_email(userinfo["email"])
 
-        request.session["user_email"] = user_email
-        request.session["user_name"] = userinfo["name"]
-        request.session["google_token"] = token
-
-        refresh_token = token.get("refresh_token")
-        if refresh_token:
-            db: Session = SessionLocal()
-            settings = db.query(UserSettings).filter(
-                UserSettings.user_email == user_email
-            ).first()
-            if settings:
-                settings.google_refresh_token = refresh_token
-            else:
-                settings = UserSettings(
-                    user_email=user_email,
-                    google_refresh_token=refresh_token
-                )
-                db.add(settings)
-            db.commit()
+        db: Session = SessionLocal()
+        allowed = db.query(AllowedUser).filter(AllowedUser.email == user_email).first()
+        if not allowed or allowed.status not in {"invited", "active"}:
+            logger.warning("invite_only_login_rejected email=%s", user_email)
             db.close()
+            request.session.clear()
+            return HTMLResponse(
+                "<html><body style='font-family:system-ui;max-width:560px;margin:80px auto'>"
+                "<h1>Beacon is currently invite-only</h1>"
+                "<p>This Google account has not been invited yet. Please contact the Beacon administrator.</p>"
+                "</body></html>", status_code=403,
+            )
+
+        settings = db.query(UserSettings).filter(UserSettings.user_email == user_email).first()
+        if not settings:
+            settings = UserSettings(user_email=user_email)
+            db.add(settings)
+        if token.get("refresh_token"):
+            settings.google_refresh_token = encrypt_token(token["refresh_token"])
+        settings.google_access_token = encrypt_token(token.get("access_token"))
+        expires_at = token.get("expires_at")
+        settings.google_token_expires_at = datetime.utcfromtimestamp(expires_at) if expires_at else None
+        settings.gmail_connected = True
+        allowed.status = "active"
+        allowed.last_login_at = datetime.utcnow()
+        db.commit()
+        db.close()
+
+        request.session.clear()
+        request.session["user_email"] = user_email
+        request.session["user_name"] = userinfo.get("name", "")
 
         return RedirectResponse(FRONTEND_URL)
 
-    except Exception as e:
-        return {"error": str(e)}
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("OAuth callback failed")
+        return HTMLResponse(
+            "<html><body style='font-family:system-ui;max-width:560px;margin:80px auto'>"
+            "<h1>We couldn't connect Gmail</h1>"
+            "<p>The authorization could not be completed. Start a fresh, secure sign-in attempt.</p>"
+            "<p><a href='/auth/login' style='display:inline-block;padding:12px 18px;"
+            "background:#6366f1;color:white;border-radius:10px;text-decoration:none'>"
+            "Try again</a></p></body></html>",
+            status_code=400,
+        )
 
 
 @app.get("/auth/status")
 async def auth_status(request: Request):
-    token = request.session.get("google_token")
-    return {"authenticated": token is not None}
+    return {"authenticated": bool(request.session.get("user_email"))}
 
 
 @app.post("/auth/logout")
 async def logout(request: Request):
     request.session.clear()
     return {"success": True}
+
+
+@app.post("/auth/disconnect")
+def disconnect_gmail(request: Request):
+    user_email = require_user(request)
+    db = SessionLocal()
+    settings = db.query(UserSettings).filter(UserSettings.user_email == user_email).first()
+    if settings:
+        token = decrypt_token(settings.google_refresh_token) or decrypt_token(settings.google_access_token)
+        if token:
+            try:
+                http_requests.post(
+                    "https://oauth2.googleapis.com/revoke",
+                    params={"token": token}, timeout=10,
+                    headers={"content-type": "application/x-www-form-urlencoded"},
+                )
+            except http_requests.RequestException:
+                logger.exception("Google revocation request failed; local credentials still removed")
+        settings.google_refresh_token = None
+        settings.google_access_token = None
+        settings.google_token_expires_at = None
+        settings.gmail_connected = False
+        settings.auto_sync_enabled = False
+        db.commit()
+    db.close()
+    request.session.clear()
+    return {"success": True, "message": "Gmail disconnected and stored credentials removed."}
 
 
 @app.get("/me")
@@ -650,7 +915,7 @@ def get_me(request: Request):
 @app.get("/tasks")
 def get_tasks(request: Request, completed: bool = False):
     db: Session = SessionLocal()
-    user_email = request.session.get("user_email")
+    user_email = require_user(request)
 
     tasks = db.query(Task).filter(
         Task.user_email == user_email,
@@ -680,20 +945,21 @@ def get_tasks(request: Request, completed: bool = False):
 
 @app.post("/sync")
 async def start_sync(request: Request):
-    token = request.session.get("google_token")
-    if not token:
-        return {"error": "Not authenticated"}
-
-    user_email = request.session.get("user_email")
+    user_email = require_user(request)
     db: Session = SessionLocal()
 
     settings = db.query(UserSettings).filter(
         UserSettings.user_email == user_email
     ).first()
-    email_count = settings.sync_email_count if settings else 100
+    if not settings or not settings.gmail_connected:
+        db.close()
+        raise HTTPException(status_code=409, detail="Gmail is disconnected")
+    creds = credentials_for(settings)
+    token = {"access_token": creds.token}
+    email_count = settings.sync_email_count
 
     job_id = str(uuid.uuid4())
-    job = SyncJob(id=job_id, status="queued")
+    job = SyncJob(id=job_id, status="queued", user_email=user_email)
     db.add(job)
     db.commit()
     db.close()
@@ -708,23 +974,32 @@ async def start_sync(request: Request):
 
 
 @app.get("/sync-status/{job_id}")
-def get_sync_status(job_id: str):
+def get_sync_status(job_id: str, request: Request):
+    user_email = require_user(request)
     db: Session = SessionLocal()
-    job = db.query(SyncJob).filter(SyncJob.id == job_id).first()
+    job = db.query(SyncJob).filter(
+        SyncJob.id == job_id, SyncJob.user_email == user_email
+    ).first()
 
     if not job:
         db.close()
         return {"status": "not_found"}
 
-    result = {"status": job.status}
+    result = {
+        "status": job.status, "emails_synced": job.emails_synced,
+        "emails_parsed": job.emails_parsed, "emails_embedded": job.emails_embedded,
+        "embedding_failures": job.embedding_failures, "indexed_chunks": job.indexed_chunks,
+        "error": job.error,
+    }
     db.close()
     return result
 
 
 @app.post("/tasks/{task_id}/complete")
-def complete_task(task_id: str):
+def complete_task(task_id: str, request: Request):
+    user_email = require_user(request)
     db: Session = SessionLocal()
-    task = db.query(Task).filter(Task.id == task_id).first()
+    task = db.query(Task).filter(Task.id == task_id, Task.user_email == user_email).first()
 
     if not task:
         db.close()
@@ -738,9 +1013,10 @@ def complete_task(task_id: str):
 
 
 @app.post("/tasks/{task_id}/reopen")
-def reopen_task(task_id: str):
+def reopen_task(task_id: str, request: Request):
+    user_email = require_user(request)
     db: Session = SessionLocal()
-    task = db.query(Task).filter(Task.id == task_id).first()
+    task = db.query(Task).filter(Task.id == task_id, Task.user_email == user_email).first()
 
     if not task:
         db.close()
@@ -754,9 +1030,10 @@ def reopen_task(task_id: str):
 
 
 @app.post("/tasks/{task_id}/hide")
-def hide_task(task_id: str):
+def hide_task(task_id: str, request: Request):
+    user_email = require_user(request)
     db: Session = SessionLocal()
-    task = db.query(Task).filter(Task.id == task_id).first()
+    task = db.query(Task).filter(Task.id == task_id, Task.user_email == user_email).first()
 
     if not task:
         db.close()
@@ -864,9 +1141,10 @@ def get_notifications(request: Request, status: str = "open"):
 
 
 @app.post("/notifications/{notification_id}/complete")
-def complete_notification(notification_id: str):
+def complete_notification(notification_id: str, request: Request):
+    user_email = require_user(request)
     db: Session = SessionLocal()
-    n = db.query(Notification).filter(Notification.id == notification_id).first()
+    n = db.query(Notification).filter(Notification.id == notification_id, Notification.user_email == user_email).first()
 
     if not n:
         db.close()
@@ -880,9 +1158,10 @@ def complete_notification(notification_id: str):
 
 
 @app.post("/notifications/{notification_id}/dismiss")
-def dismiss_notification(notification_id: str):
+def dismiss_notification(notification_id: str, request: Request):
+    user_email = require_user(request)
     db: Session = SessionLocal()
-    n = db.query(Notification).filter(Notification.id == notification_id).first()
+    n = db.query(Notification).filter(Notification.id == notification_id, Notification.user_email == user_email).first()
 
     if not n:
         db.close()
@@ -895,9 +1174,10 @@ def dismiss_notification(notification_id: str):
 
 
 @app.post("/notifications/{notification_id}/reopen")
-def reopen_notification(notification_id: str):
+def reopen_notification(notification_id: str, request: Request):
+    user_email = require_user(request)
     db: Session = SessionLocal()
-    n = db.query(Notification).filter(Notification.id == notification_id).first()
+    n = db.query(Notification).filter(Notification.id == notification_id, Notification.user_email == user_email).first()
 
     if not n:
         db.close()
@@ -912,9 +1192,10 @@ def reopen_notification(notification_id: str):
 
 
 @app.post("/notifications/{notification_id}/snooze")
-def snooze_notification(notification_id: str):
+def snooze_notification(notification_id: str, request: Request):
+    user_email = require_user(request)
     db: Session = SessionLocal()
-    n = db.query(Notification).filter(Notification.id == notification_id).first()
+    n = db.query(Notification).filter(Notification.id == notification_id, Notification.user_email == user_email).first()
 
     if not n:
         db.close()
@@ -928,9 +1209,10 @@ def snooze_notification(notification_id: str):
 
 
 @app.post("/notifications/{notification_id}/draft-reply")
-def draft_reply(notification_id: str):
+def draft_reply(notification_id: str, request: Request):
+    user_email = require_user(request)
     db: Session = SessionLocal()
-    n = db.query(Notification).filter(Notification.id == notification_id).first()
+    n = db.query(Notification).filter(Notification.id == notification_id, Notification.user_email == user_email).first()
 
     if not n:
         db.close()
@@ -958,6 +1240,28 @@ def draft_reply(notification_id: str):
     db.commit()
     db.close()
     return {"draft": draft}
+
+
+@app.patch("/notifications/bulk")
+def bulk_update_notifications(body: BulkNotificationRequest, request: Request):
+    user_email = require_user(request)
+    if body.status not in {"completed", "dismissed"}:
+        raise HTTPException(status_code=422, detail="Unsupported status")
+    ids = list(dict.fromkeys(body.ids))[:500]
+    if not ids:
+        return {"updated": 0}
+    db = SessionLocal()
+    values = {"status": body.status}
+    if body.status == "completed":
+        values["completed_at"] = datetime.utcnow()
+    updated = db.query(Notification).filter(
+        Notification.user_email == user_email,
+        Notification.id.in_(ids),
+        Notification.status.in_(["open", "snoozed"]),
+    ).update(values, synchronize_session=False)
+    db.commit()
+    db.close()
+    return {"updated": updated}
 
 
 @app.get("/emails/{email_id}")
@@ -996,9 +1300,18 @@ def get_insights(request: Request):
         return {"error": "Not authenticated"}
 
     db: Session = SessionLocal()
+    db.query(Insight).filter(
+        Insight.user_email == user_email,
+        Insight.status == "active",
+        Insight.expires_at.isnot(None),
+        Insight.expires_at <= datetime.utcnow(),
+    ).update({"status": "expired", "updated_at": datetime.utcnow()}, synchronize_session=False)
+    db.commit()
     insights = db.query(Insight).filter(
         Insight.user_email == user_email,
-        Insight.is_dismissed == False
+        Insight.is_dismissed == False,
+        Insight.status == "active",
+        ((Insight.expires_at.is_(None)) | (Insight.expires_at > datetime.utcnow())),
     ).order_by(Insight.created_at.desc()).limit(10).all()
     db.close()
 
@@ -1009,21 +1322,45 @@ def get_insights(request: Request):
             "description": i.description,
             "insight_type": i.insight_type,
             "created_at": i.created_at.isoformat() if i.created_at else None,
+            "evidence_email_ids": json.loads(i.evidence_email_ids or "[]"),
         }
         for i in insights
     ]}
 
 
 @app.post("/insights/{insight_id}/dismiss")
-def dismiss_insight(insight_id: str):
+def dismiss_insight(insight_id: str, request: Request):
+    user_email = require_user(request)
     db: Session = SessionLocal()
-    insight = db.query(Insight).filter(Insight.id == insight_id).first()
+    insight = db.query(Insight).filter(Insight.id == insight_id, Insight.user_email == user_email).first()
 
     if not insight:
         db.close()
         return {"error": "Insight not found"}
 
     insight.is_dismissed = True
+    insight.status = "dismissed"
+    insight.updated_at = datetime.utcnow()
+    db.commit()
+    db.close()
+    return {"success": True}
+
+
+@app.post("/insights/{insight_id}/feedback")
+def add_insight_feedback(insight_id: str, body: FeedbackRequest, request: Request):
+    user_email = require_user(request)
+    allowed_reasons = {None, "already_knew", "incorrect", "not_actionable", "irrelevant", "duplicate"}
+    if body.reason not in allowed_reasons:
+        raise HTTPException(status_code=422, detail="Unsupported feedback reason")
+    db = SessionLocal()
+    insight = db.query(Insight).filter(Insight.id == insight_id, Insight.user_email == user_email).first()
+    if not insight:
+        db.close()
+        raise HTTPException(status_code=404, detail="Insight not found")
+    db.add(InsightFeedback(
+        id=str(uuid.uuid4()), insight_id=insight_id, user_email=user_email,
+        useful=body.useful, reason=body.reason,
+    ))
     db.commit()
     db.close()
     return {"success": True}
@@ -1045,13 +1382,15 @@ def get_settings(request: Request):
         return {
             "auto_sync_enabled": True,
             "sync_frequency_hours": 1,
-            "sync_email_count": 100
+            "sync_email_count": 100,
+            "gmail_connected": False,
         }
 
     return {
         "auto_sync_enabled": settings.auto_sync_enabled,
         "sync_frequency_hours": settings.sync_frequency_hours,
-        "sync_email_count": settings.sync_email_count
+        "sync_email_count": settings.sync_email_count,
+        "gmail_connected": settings.gmail_connected,
     }
 
 
@@ -1079,45 +1418,70 @@ def update_settings(body: SettingsRequest, request: Request):
     return {"success": True}
 
 
+def hybrid_retrieve(db: Session, user_email: str, query: str, limit: int):
+    query_embedding = embed_text(query)
+    semantic = db.query(EmailChunk).filter(
+        EmailChunk.user_email == user_email
+    ).order_by(EmailChunk.embedding.cosine_distance(query_embedding)).limit(limit * 4).all()
+
+    terms = search_terms(query)
+    keyword = []
+    if terms:
+        keyword_query = db.query(EmailChunk).join(
+            ProcessedEmail, ProcessedEmail.id == EmailChunk.processed_email_id
+        ).filter(EmailChunk.user_email == user_email)
+        keyword_query = keyword_query.filter(
+            or_(*[
+                func.lower(
+                    func.concat(
+                        func.coalesce(ProcessedEmail.subject, ""), " ",
+                        func.coalesce(ProcessedEmail.sender, ""), " ",
+                        func.coalesce(EmailChunk.content, ""),
+                    )
+                ).contains(term)
+                for term in terms
+            ])
+        )
+        keyword = keyword_query.limit(limit * 4).all()
+
+    chunks_by_email = {}
+    for chunks in (semantic, keyword):
+        for chunk in chunks:
+            chunks_by_email.setdefault(chunk.processed_email_id, chunk)
+    ranked_ids = reciprocal_rank_fusion(
+        [[chunk.processed_email_id for chunk in semantic],
+         [chunk.processed_email_id for chunk in keyword]],
+        [1.0, 1.25],
+    )[:limit]
+    if not ranked_ids:
+        return []
+    emails = db.query(ProcessedEmail).filter(
+        ProcessedEmail.user_email == user_email, ProcessedEmail.id.in_(ranked_ids)
+    ).all()
+    emails_by_id = {email.id: email for email in emails}
+    return [(chunks_by_email[email_id], emails_by_id.get(email_id)) for email_id in ranked_ids]
+
+
 @app.get("/search")
 def semantic_search(query: str, request: Request, limit: int = 10):
     user_email = request.session.get("user_email")
     if not user_email:
         return {"error": "Not authenticated"}
 
-    query_embedding = embed_text(query)
     db: Session = SessionLocal()
 
     try:
-        chunks = db.query(EmailChunk).filter(
-            EmailChunk.user_email == user_email
-        ).order_by(
-            EmailChunk.embedding.cosine_distance(query_embedding)
-        ).limit(limit * 3).all()
-
         results = []
-        seen_email_ids = set()
-
-        for chunk in chunks:
-            if chunk.processed_email_id in seen_email_ids:
-                continue
-
-            seen_email_ids.add(chunk.processed_email_id)
-
-            email = db.query(ProcessedEmail).filter(
-                ProcessedEmail.id == chunk.processed_email_id
-            ).first()
-
+        for chunk, email in hybrid_retrieve(db, user_email, query, min(max(limit, 1), 50)):
             results.append({
                 "email_id": chunk.processed_email_id,
                 "subject": email.subject if email else "",
                 "sender": email.sender if email else "",
                 "snippet": email.snippet if email else "",
-                "chunk_preview": chunk.content[:300]
+                "chunk_preview": chunk.content[:300],
+                "gmail_message_id": email.gmail_message_id if email else None,
+                "rfc822_message_id": email.rfc822_message_id if email else None,
             })
-
-            if len(results) >= limit:
-                break
 
         return {"results": results}
 
@@ -1131,29 +1495,19 @@ def ask_inbox(body: AskRequest, request: Request):
     if not user_email:
         return {"error": "Not authenticated"}
 
-    question_embedding = embed_text(body.question)
     db: Session = SessionLocal()
 
     try:
-        chunks = db.query(EmailChunk).filter(
-            EmailChunk.user_email == user_email
-        ).order_by(
-            EmailChunk.embedding.cosine_distance(question_embedding)
-        ).limit(5).all()
-
-        context_chunks = [chunk.content for chunk in chunks]
+        retrieved = hybrid_retrieve(db, user_email, body.question, 8)
+        context_chunks = [chunk.content for chunk, _ in retrieved]
 
         sources = []
         seen = set()
 
-        for chunk in chunks:
+        for chunk, email in retrieved:
             if chunk.processed_email_id in seen:
                 continue
             seen.add(chunk.processed_email_id)
-
-            email = db.query(ProcessedEmail).filter(
-                ProcessedEmail.id == chunk.processed_email_id
-            ).first()
 
             if email:
                 sources.append({
@@ -1168,13 +1522,86 @@ def ask_inbox(body: AskRequest, request: Request):
         db.close()
 
 
+@app.get("/indexing-status")
+def get_indexing_status(request: Request):
+    user_email = require_user(request)
+    db = SessionLocal()
+    status = db.query(IndexingStatus).filter(IndexingStatus.user_email == user_email).first()
+    result = {
+        "emails_synced": status.emails_synced if status else 0,
+        "emails_parsed": status.emails_parsed if status else 0,
+        "emails_embedded": status.emails_embedded if status else 0,
+        "embedding_failures": status.embedding_failures if status else 0,
+        "indexed_chunks": status.indexed_chunks if status else 0,
+        "last_successful_indexing_at": status.last_successful_indexing_at.isoformat() if status and status.last_successful_indexing_at else None,
+    }
+    db.close()
+    return result
+
+
+@app.get("/admin/allowed-users")
+def list_allowed_users(request: Request):
+    require_admin(request)
+    db = SessionLocal()
+    users = db.query(AllowedUser).order_by(AllowedUser.created_at.desc()).all()
+    result = [{
+        "id": user.id, "email": user.email, "status": user.status,
+        "invited_by": user.invited_by,
+        "created_at": user.created_at.isoformat() if user.created_at else None,
+        "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
+    } for user in users]
+    db.close()
+    return {"users": result}
+
+
+@app.post("/admin/allowed-users", status_code=201)
+def invite_allowed_user(body: AllowedUserRequest, request: Request):
+    admin = require_admin(request)
+    email = normalize_email(body.email)
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+        raise HTTPException(status_code=422, detail="A valid email is required")
+    db = SessionLocal()
+    user = db.query(AllowedUser).filter(AllowedUser.email == email).first()
+    if user:
+        user.status = "invited"
+    else:
+        user = AllowedUser(id=str(uuid.uuid4()), email=email, invited_by=admin, status="invited")
+        db.add(user)
+    db.commit()
+    db.close()
+    return {"success": True, "email": email, "status": "invited"}
+
+
+@app.patch("/admin/allowed-users/{allowed_user_id}/{status}")
+def update_allowed_user(allowed_user_id: str, status: str, request: Request):
+    admin = require_admin(request)
+    if status not in {"active", "revoked"}:
+        raise HTTPException(status_code=422, detail="Status must be active or revoked")
+    db = SessionLocal()
+    user = db.query(AllowedUser).filter(AllowedUser.id == allowed_user_id).first()
+    if not user:
+        db.close()
+        raise HTTPException(status_code=404, detail="Allowed user not found")
+    if user.email == admin and status == "revoked":
+        db.close()
+        raise HTTPException(status_code=409, detail="The configured administrator cannot be revoked")
+    user.status = status
+    db.commit()
+    db.close()
+    return {"success": True, "status": status}
+
+
 @app.get("/gmail/messages")
 async def get_gmail_messages(request: Request):
-    token = request.session.get("google_token")
-    if not token:
-        return {"error": "Not authenticated"}
-
-    credentials = Credentials(token=token["access_token"])
+    user_email = require_user(request)
+    db = SessionLocal()
+    settings = db.query(UserSettings).filter(UserSettings.user_email == user_email).first()
+    if not settings or not settings.gmail_connected:
+        db.close()
+        raise HTTPException(status_code=409, detail="Gmail is disconnected")
+    credentials = credentials_for(settings)
+    db.commit()
+    db.close()
     gmail = build("gmail", "v1", credentials=credentials)
 
     results = gmail.users().messages().list(

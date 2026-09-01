@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Sparkles, X } from "lucide-react";
+import { Sparkles, X, ThumbsUp, ThumbsDown } from "lucide-react";
+import { sendInsightFeedback } from "../services/api";
 
 import type { Insight } from "../types/notification";
 
@@ -10,6 +11,12 @@ type Props = {
 
 export default function InsightItem({ insight, onDismiss }: Props) {
   const [expanded, setExpanded] = useState(false);
+  const [feedbackSent, setFeedbackSent] = useState(false);
+
+  async function feedback(useful: boolean) {
+    await sendInsightFeedback(insight.id, useful);
+    setFeedbackSent(true);
+  }
 
   return (
     <div className="group flex items-start gap-3 py-2.5">
@@ -30,6 +37,23 @@ export default function InsightItem({ insight, onDismiss }: Props) {
             {insight.description}
           </p>
         )}
+        {expanded && !feedbackSent && (
+          <span className="flex gap-2 mt-2">
+            <span
+              role="button"
+              tabIndex={0}
+              onClick={(event) => { event.stopPropagation(); feedback(true); }}
+              className="inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-emerald-400"
+            ><ThumbsUp size={12} /> Useful</span>
+            <span
+              role="button"
+              tabIndex={0}
+              onClick={(event) => { event.stopPropagation(); feedback(false); }}
+              className="inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-red-400"
+            ><ThumbsDown size={12} /> Not useful</span>
+          </span>
+        )}
+        {expanded && feedbackSent && <span className="block text-xs text-zinc-600 mt-2">Thanks for the feedback.</span>}
       </button>
 
       <button
