@@ -176,7 +176,7 @@ export default function SearchPanel() {
                       href={gmailUrl(result.email_id, result.gmail_message_id, result.rfc822_message_id) ?? undefined}
                       target="_blank"
                       rel="noreferrer"
-                      className="inline-block text-xs text-indigo-400 hover:text-indigo-300 mt-3"
+                      className="desktop-only-email-link text-xs text-indigo-400 hover:text-indigo-300 mt-3"
                     >Open in Gmail</a>
                   )}
                 </div>

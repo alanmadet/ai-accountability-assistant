@@ -89,7 +89,7 @@ function NotificationCard({
                 target="_blank"
                 rel="noreferrer"
                 onClick={stop}
-                className="shrink-0 inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-zinc-800/70 text-zinc-300 hover:bg-zinc-700/80 transition"
+                className="desktop-only-email-link shrink-0 items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-zinc-800/70 text-zinc-300 hover:bg-zinc-700/80 transition"
               >
                 <Mail size={12} />
                 {config.openLabel}

@@ -1,5 +1,17 @@
 import { useEffect, useState } from "react";
-import { X, Mail, Clock3, Check, Copy, PenLine, Loader2, BellOff, CalendarPlus } from "lucide-react";
+import {
+  X,
+  Mail,
+  Clock3,
+  Check,
+  Copy,
+  PenLine,
+  Loader2,
+  BellOff,
+  CalendarPlus,
+  ChevronDown,
+  ChevronUp,
+} from "lucide-react";
 
 import type { Notification, EmailDetail } from "../types/notification";
 import { getKindConfig } from "../constants/notificationKinds";
@@ -26,10 +38,14 @@ export default function NotificationModal({
   const [draft, setDraft] = useState("");
   const [loadingDraft, setLoadingDraft] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [emailExpanded, setEmailExpanded] = useState(false);
 
   const config = getKindConfig(notification.kind);
   const Icon = config.icon;
   const deadlineLabel = formatDeadline(notification.deadline);
+  const emailContent = email?.body || email?.snippet || "";
+  const emailCanExpand =
+    emailContent.length > 280 || emailContent.split(/\r?\n/).length > 6;
   const emailUrl = gmailUrl(
     notification.source_email_id,
     notification.gmail_message_id,
@@ -44,6 +60,7 @@ export default function NotificationModal({
     setEmail(null);
     setDraft("");
     setCopied(false);
+    setEmailExpanded(false);
 
     if (!notification.source_email_id) return;
 
@@ -186,7 +203,7 @@ export default function NotificationModal({
                   href={emailUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center gap-1.5 text-sm px-3 py-2 rounded-lg bg-zinc-800/70 text-zinc-300 hover:bg-zinc-700/80 transition"
+                  className="desktop-only-email-link items-center gap-1.5 text-sm px-3 py-2 rounded-lg bg-zinc-800/70 text-zinc-300 hover:bg-zinc-700/80 transition"
                 >
                   <Mail size={14} />
                   Open Original Email
@@ -265,9 +282,26 @@ export default function NotificationModal({
                   {email.subject || "(no subject)"}
                 </p>
                 <p className="text-xs text-zinc-400 mt-1 mb-3">{email.sender}</p>
-                <p className="text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap break-words line-clamp-6">
-                  {email.snippet || email.body}
+                <p
+                  id={`email-body-${email.id}`}
+                  className={`text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap break-words ${
+                    emailExpanded || !emailCanExpand ? "" : "line-clamp-6"
+                  }`}
+                >
+                  {emailContent}
                 </p>
+                {emailCanExpand && (
+                  <button
+                    type="button"
+                    onClick={() => setEmailExpanded((expanded) => !expanded)}
+                    aria-expanded={emailExpanded}
+                    aria-controls={`email-body-${email.id}`}
+                    className="inline-flex items-center gap-1.5 mt-3 text-xs font-medium text-indigo-300 hover:text-indigo-200 transition"
+                  >
+                    {emailExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                    {emailExpanded ? "Collapse email" : "Show full email"}
+                  </button>
+                )}
               </div>
             )}
 
